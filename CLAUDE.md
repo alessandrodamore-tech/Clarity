@@ -1,8 +1,25 @@
 # CLAUDE.md — Clarity Project Context
 
+## Mission & Why This Exists
+
+Clarity is a **mental health self-tracking app** — you write freely about your day, and AI structures, analyzes, and finds patterns in your data.
+
+### The Personal Story
+Alex (the founder, 21) has ADHD and tracks his mood, energy, medications, and daily experiences. He was doing this manually on Notion with timestamped annotations — dozens per day. Clarity was born to replace that workflow with something purpose-built: zero-friction input, automatic pattern detection, and cross-day insights.
+
+### The Strategic Goal
+Alex is applying to **Nova SBE (Lisbon)** for the Master in Impact Entrepreneurship & Innovation. His academic profile is average (GPA ~23/30), so the application relies on a strong **entrepreneurial narrative**. Clarity is the proof — a real product, built and shipped, that shows initiative, technical skill, and genuine problem-solving.
+
+The app needs to be **publicly presentable as a product**, not just a personal tool. Think: polished enough that a stranger could sign up, use it, and get value from it.
+
+### Design Philosophy
+- **Zero friction**: writing an entry should feel like texting yourself
+- **AI stays out of the way**: the Home feed is pure journaling, no AI clutter. Analysis lives in dedicated pages (Trends, Insights, DayDetail)
+- **Beautiful but not flashy**: glass morphism, soft gradients, calm palette. It's a mental health app — the UI should feel safe and quiet
+- **Mobile-first**: designed as a personal diary app, used primarily from phone
+
 ## What is Clarity?
 Mental health self-tracking app. Write freely about your day, AI structures and analyzes it.
-Built for personal use (Alex) but designed as a public product for a Nova SBE master's application.
 
 ## Tech Stack
 - **Frontend**: React 19 + Vite, no component library, no charting library — everything hand-built
