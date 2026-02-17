@@ -42,8 +42,14 @@ export default function Login() {
       }}>
         <h1 style={{
           fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: '2.5rem',
-          color: 'var(--navy)', letterSpacing: '-0.03em', marginBottom: 24, textAlign: 'center',
+          color: 'var(--navy)', letterSpacing: '-0.03em', marginBottom: 8, textAlign: 'center',
         }}>Clarity.</h1>
+        <div style={{ textAlign: 'center', marginBottom: 24 }}>
+          <a href="/" style={{
+            fontSize: '0.8rem', color: 'var(--text-light)', textDecoration: 'none',
+            transition: 'color 0.2s',
+          }} onMouseOver={e => e.target.style.color = 'var(--text-muted)'} onMouseOut={e => e.target.style.color = 'var(--text-light)'}>← Back to homepage</a>
+        </div>
 
         {/* Tab toggle */}
         <div className="glass" style={{ borderRadius: 14, padding: 4, display: 'flex', marginBottom: 24 }}>

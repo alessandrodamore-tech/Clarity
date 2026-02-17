@@ -2,7 +2,11 @@
 
 ## Mission & Why This Exists
 
-Clarity is a **mental health self-tracking app** — you write freely about your day, and AI structures, analyzes, and finds patterns in your data.
+**Clarity è un diario intelligente per la salute mentale.** Scrivi liberamente del tuo giorno — come faresti in un messaggio — e un assistente AI lavora silenziosamente per te: capisce come ti senti, riconosce pattern nel tuo umore, energia e farmaci, ti ricorda le cose da fare che hai menzionato senza che tu debba creare liste, ti suggerisce cosa monitorare e ti avvisa quando qualcosa non va.
+
+È il ponte tra il qualitativo e il quantitativo: le tue parole diventano dati, i dati diventano insight, gli insight diventano un report clinico strutturato che puoi esportare e portare al tuo specialista — così chi ti cura vede settimane di dati reali, non il racconto vago di una visita di quindici minuti.
+
+Zero friction per scrivere, massimo valore in uscita. Pensato per chi convive con ADHD, disturbi dell'umore o semplicemente per chi vuole capirsi meglio senza fare fatica.
 
 ### The Personal Story
 Alex (the founder, 21) has ADHD and tracks his mood, energy, medications, and daily experiences. He was doing this manually on Notion with timestamped annotations — dozens per day. Clarity was born to replace that workflow with something purpose-built: zero-friction input, automatic pattern detection, and cross-day insights.
@@ -19,7 +23,7 @@ The app needs to be **publicly presentable as a product**, not just a personal t
 - **Mobile-first**: designed as a personal diary app, used primarily from phone
 
 ## What is Clarity?
-Mental health self-tracking app. Write freely about your day, AI structures and analyzes it.
+A smart mental health journal. Write freely about your day — AI extracts patterns, generates reminders, and builds clinical reports you can share with your specialist. Qualitative in, quantitative out.
 
 ## Tech Stack
 - **Frontend**: React 19 + Vite, no component library, no charting library — everything hand-built

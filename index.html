@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Clarity — Your mind, decoded.</title>
-    <meta name="description" content="Write freely about your day. Clarity's AI extracts patterns from your mood, energy, and medications — so you finally understand what works.">
+    <meta name="description" content="Write freely about your day. Clarity's AI extracts patterns, generates reminders, and builds clinical reports you can share with your specialist.">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
@@ -249,56 +249,28 @@
             font-weight: 300;
         }
 
-        /* === FORM === */
-        .hero-form {
-            display: flex;
-            gap: 8px;
-            max-width: 420px;
-            width: 100%;
-            z-index: 2;
-        }
-        .hero-form input {
-            flex: 1;
-            padding: 14px 22px;
-            border: 1px solid rgba(255, 255, 255, 0.45);
-            border-radius: 100px;
-            font-family: var(--font-body);
-            font-size: 0.92rem;
-            background: rgba(255, 255, 255, 0.2);
-            backdrop-filter: blur(16px);
-            -webkit-backdrop-filter: blur(16px);
-            color: var(--text);
-            outline: none;
-            transition: all 0.3s;
-        }
-        .hero-form input:focus {
-            border-color: rgba(255, 255, 255, 0.7);
-            background: rgba(255, 255, 255, 0.35);
-        }
-        .hero-form input::placeholder { color: var(--text-light); }
-        .hero-form button {
-            padding: 14px 26px;
+        /* === HERO CTA === */
+        .hero-cta {
+            display: inline-block;
+            padding: 16px 36px;
             background: rgba(42, 42, 69, 0.85);
             color: var(--white);
-            border: none;
             border-radius: 100px;
             font-family: var(--font-body);
-            font-size: 0.92rem;
+            font-size: 1rem;
             font-weight: 600;
-            cursor: pointer;
+            text-decoration: none;
             transition: all 0.3s;
-            white-space: nowrap;
             backdrop-filter: blur(8px);
+            z-index: 2;
         }
-        .hero-form button:hover {
+        .hero-cta:hover {
             transform: translateY(-2px);
             background: rgba(42, 42, 69, 0.95);
             box-shadow: 0 8px 24px rgba(42, 42, 69, 0.2);
         }
         @media (max-width: 520px) {
             .hero { padding: 120px 20px 50px; }
-            .hero-form { flex-direction: column; }
-            .hero-form button { width: 100%; }
         }
 
         /* === MOCKUP === */
@@ -592,23 +564,22 @@
             max-width: 400px;
             margin: 0 auto 36px;
         }
-        .bottom-cta .hero-form { margin: 0 auto; }
-        .bottom-cta input {
-            background: rgba(255,255,255,0.08) !important;
-            border-color: rgba(255,255,255,0.15) !important;
-            color: #fff !important;
+        .bottom-cta-btn {
+            display: inline-block;
+            padding: 16px 36px;
+            background: rgba(232, 168, 56, 0.85);
+            color: var(--navy);
+            border-radius: 100px;
+            font-family: var(--font-body);
+            font-size: 1rem;
+            font-weight: 600;
+            text-decoration: none;
+            transition: all 0.3s;
         }
-        .bottom-cta input::placeholder { color: rgba(255,255,255,0.3) !important; }
-        .bottom-cta input:focus {
-            border-color: rgba(255,255,255,0.4) !important;
-            background: rgba(255,255,255,0.15) !important;
-        }
-        .bottom-cta button {
-            background: rgba(232, 168, 56, 0.85) !important;
-            color: var(--navy) !important;
-        }
-        .bottom-cta button:hover {
-            background: rgba(232, 168, 56, 0.95) !important;
+        .bottom-cta-btn:hover {
+            transform: translateY(-2px);
+            background: rgba(232, 168, 56, 0.95);
+            box-shadow: 0 8px 24px rgba(232, 168, 56, 0.2);
         }
 
         /* === FOOTER === */
@@ -633,22 +604,19 @@
         <ul class="nav-links">
             <li><a href="#how-it-works" class="nav-hide">How it works</a></li>
             <li><a href="#features" class="nav-hide">Features</a></li>
-            <li><a href="#waitlist" class="nav-cta">Join waitlist</a></li>
+            <li><a href="/app/" class="nav-cta">Try Clarity</a></li>
         </ul>
     </nav>
 
     <section class="hero">
         <div class="reveal">
-            <div class="hero-badge glass">Early access — launching 2026</div>
+            <div class="hero-badge glass">AI-powered health journal</div>
         </div>
         <h1 class="reveal reveal-delay-1">Your mind, <em>decoded.</em></h1>
         <p class="hero-sub reveal reveal-delay-2">
-            Write freely about your day — mood, energy, meds, anything. Clarity's AI finds the patterns you can't see yourself.
+            Write freely about your day. AI works silently for you — extracting patterns, generating reminders, and building reports you can share with your specialist.
         </p>
-        <form class="hero-form reveal reveal-delay-3" onsubmit="handleWaitlist(event, this)">
-            <input type="email" placeholder="your@email.com" required>
-            <button type="submit">Join waitlist</button>
-        </form>
+        <a href="/app/" class="hero-cta reveal reveal-delay-3">Start journaling →</a>
 
         <div class="hero-mockup reveal reveal-delay-4">
             <div class="mockup-window glass">
@@ -661,21 +629,27 @@
                     <div class="mockup-input">
                         <div class="mockup-input-label">Your entry</div>
                         <div class="mockup-text">
-                            Woke up at 9, pretty tired with a bit of a <span class="highlight">hangover</span> from last night. Took <span class="highlight">Elvanse</span> and within an hour I felt way more <span class="highlight">productive</span>. Hit the <span class="highlight">gym</span> at 11. Afternoon <span class="highlight">energy crash</span> around 3pm as usual.<span class="mockup-cursor"></span>
+                            Slept ok but woke up <span class="highlight">anxious</span>. Took <span class="highlight">Elvanse</span> at 9, had a long <span class="highlight">walk</span> which helped a lot. Focused all morning. Need to <span class="highlight">call the dentist</span> and <span class="highlight">refill prescription</span>. Energy dropped after lunch.<span class="mockup-cursor"></span>
                         </div>
                     </div>
                     <div class="mockup-output">
-                        <div class="mockup-output-label">Clarity extracted</div>
+                        <div class="mockup-output-label">Clarity works for you</div>
                         <div class="mockup-tags">
                             <span class="mockup-tag tag-mood">😊 Mood: 4→7</span>
-                            <span class="mockup-tag tag-energy">⚡ Energy: 3→8→4</span>
+                            <span class="mockup-tag tag-energy">⚡ Energy: low→high→mid</span>
                             <span class="mockup-tag tag-med">💊 Elvanse 9:00</span>
-                            <span class="mockup-tag tag-activity">🏋️ Gym 11:00</span>
+                            <span class="mockup-tag tag-activity">🚶 Walk — morning</span>
+                        </div>
+                        <div class="mockup-insight" style="margin-top: 8px;">
+                            <div class="mockup-insight-icon">🔔</div>
+                            <div class="mockup-insight-text">
+                                <strong>Reminder:</strong> Call the dentist · Refill prescription
+                            </div>
                         </div>
                         <div class="mockup-insight">
                             <div class="mockup-insight-icon">💡</div>
                             <div class="mockup-insight-text">
-                                <strong>Pattern detected:</strong> Your 3pm crash is 40% more likely when Elvanse is taken after 8:30am.
+                                <strong>Pattern:</strong> Morning walks correlate with better focus windows. Energy dips post-lunch 4 of the last 5 days.
                             </div>
                         </div>
                     </div>
@@ -698,12 +672,12 @@
                 <div class="problem-card glass reveal reveal-delay-2">
                     <div class="problem-icon">🧩</div>
                     <h3>Patterns stay hidden</h3>
-                    <p>You know something affects your energy, but you can't pinpoint what. The data is scattered and lost.</p>
+                    <p>You journal, you track, you take notes — but the insights stay buried. Qualitative data never becomes actionable.</p>
                 </div>
                 <div class="problem-card glass reveal reveal-delay-3">
                     <div class="problem-icon">🗣️</div>
-                    <h3>Your therapist guesses</h3>
-                    <p>"How have you been?" You try to remember. They try to interpret. Both working with fragments.</p>
+                    <h3>Your doctor guesses</h3>
+                    <p>"How have you been?" You try to remember two weeks in fifteen minutes. They work with fragments, not data.</p>
                 </div>
             </div>
         </div>
@@ -723,15 +697,15 @@
                 </div>
                 <div class="step reveal reveal-delay-2">
                     <div class="step-number">02</div>
-                    <h3>AI structures it</h3>
-                    <p>Clarity extracts mood, energy, medications, sleep, activities — automatically.</p>
-                    <div class="step-example">Mood: 4→7 · Energy: low→moderate · Meds: late · Activity: walk</div>
+                    <h3>AI works for you</h3>
+                    <p>Clarity extracts patterns, generates reminders from things you mentioned, and identifies what to monitor — all automatically.</p>
+                    <div class="step-example">Mood: improving · Elvanse: consistent · Reminder: call dentist · Pattern: walks → better focus</div>
                 </div>
                 <div class="step reveal reveal-delay-3">
                     <div class="step-number">03</div>
-                    <h3>See your patterns</h3>
-                    <p>Over time, Clarity reveals what actually drives your mental state.</p>
-                    <div class="step-example">"Walks improve your evening mood by 35%. Late meds correlate with morning grogginess."</div>
+                    <h3>Share with your specialist</h3>
+                    <p>A structured clinical report — weeks of real data, not a vague recap. Export it and bring it to your next appointment.</p>
+                    <div class="step-example">"Mood trend: improving. Confirmed: morning exercise correlates with +2 energy. Hypothesis: caffeine after 2pm disrupts sleep 70% of the time."</div>
                 </div>
             </div>
         </div>
@@ -745,22 +719,22 @@
                 <div class="feature-card glass reveal reveal-delay-1">
                     <div class="feature-icon">✍️</div>
                     <h3>Natural language input</h3>
-                    <p>Write however you want — messy thoughts, voice notes, quick updates. Clarity understands context.</p>
+                    <p>Write like you're texting a friend — messy thoughts, quick updates, any language. AI understands the context.</p>
                 </div>
                 <div class="feature-card glass reveal reveal-delay-2">
-                    <div class="feature-icon">📊</div>
-                    <h3>Automatic pattern detection</h3>
-                    <p>AI correlates entries across time. Discover which habits actually move the needle.</p>
+                    <div class="feature-icon">🔔</div>
+                    <h3>Smart reminders</h3>
+                    <p>Mention "I need to call the dentist" in an entry and Clarity remembers for you. No lists, no effort. Built for busy minds.</p>
                 </div>
                 <div class="feature-card glass reveal reveal-delay-3">
                     <div class="feature-icon">🩺</div>
-                    <h3>Therapist reports</h3>
-                    <p>Shareable reports with real data for your psychiatrist. Replace guesswork with trends.</p>
+                    <h3>Clinical reports</h3>
+                    <p>A structured report with trends, medication analysis, and actionable patterns — ready to share with your doctor.</p>
                 </div>
                 <div class="feature-card glass reveal reveal-delay-4">
-                    <div class="feature-icon">🔮</div>
-                    <h3>Predictive insights</h3>
-                    <p>"Slept under 6h for 3 nights — historically, a mood dip follows within 48 hours."</p>
+                    <div class="feature-icon">📊</div>
+                    <h3>Pattern detection</h3>
+                    <p>Correlations between mood, energy, medications, and activities — surfaced automatically over time.</p>
                 </div>
             </div>
         </div>
@@ -769,45 +743,42 @@
     <section class="for-whom" id="for-whom">
         <div class="container">
             <div class="section-label reveal">Built for</div>
-            <h2 class="section-title reveal reveal-delay-1">Anyone who wants to understand their own mind.</h2>
+            <h2 class="section-title reveal reveal-delay-1">Anyone who wants to understand themselves better.</h2>
             <div class="persona-grid">
                 <div class="persona-card glass reveal reveal-delay-1">
                     <div class="persona-emoji">🧠</div>
-                    <h3>ADHD</h3>
-                    <p>Track medication effects and focus windows without cognitive load.</p>
+                    <h3>Busy minds</h3>
+                    <p>Automatic reminders, zero cognitive load. You just write — Clarity organizes the rest.</p>
                 </div>
                 <div class="persona-card glass reveal reveal-delay-2">
                     <div class="persona-emoji">💊</div>
-                    <h3>Psychiatric patients</h3>
-                    <p>Compare medication regimes objectively. Data over guesswork.</p>
+                    <h3>People on medication</h3>
+                    <p>Monitor effects, compare regimes, track what actually changes. Real data, not guesses.</p>
                 </div>
                 <div class="persona-card glass reveal reveal-delay-3">
                     <div class="persona-emoji">🧑‍⚕️</div>
-                    <h3>Therapists</h3>
-                    <p>Structured reports. Trends between sessions that conversations miss.</p>
+                    <h3>Health professionals</h3>
+                    <p>Structured reports between sessions. Weeks of real data instead of a fifteen-minute recap.</p>
                 </div>
                 <div class="persona-card glass reveal reveal-delay-4">
                     <div class="persona-emoji">🌱</div>
-                    <h3>Self-optimizers</h3>
-                    <p>What drives your mood and energy? No diagnosis needed.</p>
+                    <h3>The curious</h3>
+                    <p>What drives your mood and energy? You don't need a diagnosis to want to understand yourself.</p>
                 </div>
             </div>
         </div>
     </section>
 
-    <section class="bottom-cta" id="waitlist">
+    <section class="bottom-cta" id="get-started">
         <div class="container">
             <h2 class="section-title reveal">Start understanding yourself.</h2>
-            <p class="section-desc reveal reveal-delay-1">Join the waitlist for early access. Be the first to decode your own patterns.</p>
-            <form class="hero-form reveal reveal-delay-2" onsubmit="handleWaitlist(event, this)">
-                <input type="email" placeholder="your@email.com" required>
-                <button type="submit">Get early access</button>
-            </form>
+            <p class="section-desc reveal reveal-delay-1">Your words become data. Data becomes insight. Insight becomes a conversation with your specialist.</p>
+            <a href="/app/" class="bottom-cta-btn reveal reveal-delay-2">Try Clarity free →</a>
         </div>
     </section>
 
     <footer>
-        <p>© 2026 Clarity. Built with purpose. <a href="https://github.com/alessandrodamore-tech/clarity" target="_blank">GitHub</a></p>
+        <p>© 2026 Clarity. Built with purpose. <a href="/app/">Open app</a> · <a href="https://github.com/alessandrodamore-tech/clarity" target="_blank">GitHub</a></p>
     </footer>
 
     <script>
@@ -820,15 +791,6 @@
         window.addEventListener('scroll', () => {
             document.querySelector('nav').classList.toggle('scrolled', window.scrollY > 50);
         });
-        function handleWaitlist(e, form) {
-            e.preventDefault();
-            const btn = form.querySelector('button');
-            const orig = btn.textContent;
-            btn.textContent = '✓ You\'re in!';
-            btn.style.background = 'rgba(40, 200, 64, 0.7)';
-            form.querySelector('input').value = '';
-            setTimeout(() => { btn.textContent = orig; btn.style.background = ''; }, 3000);
-        }
     </script>
 </body>
 </html>
