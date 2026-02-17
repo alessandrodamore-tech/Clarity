@@ -1,15 +1,29 @@
 import { supabase } from './supabase'
 
-const API_KEY = import.meta.env.VITE_GEMINI_API_KEY
-const MODEL = 'gemini-2.0-flash'
-const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${API_KEY}`
+const DIRECT_API_KEY = import.meta.env.VITE_GEMINI_API_KEY
+const MODEL = 'gemini-3-pro-preview'
+const DIRECT_API_URL = DIRECT_API_KEY
+  ? `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${DIRECT_API_KEY}`
+  : null
+const PROXY_URL = '/api/gemini'
 
 const CACHE_KEY = 'clarity_day_summaries'
+const USER_CONTEXT_KEY = 'clarity_user_context'
 
-// Attempt to repair truncated JSON by closing open brackets/braces/strings
+// ─── USER CONTEXT (profile instructions) ─────────────────
+function getUserContext() {
+  try {
+    const ctx = localStorage.getItem(USER_CONTEXT_KEY)
+    return ctx && ctx.trim() ? ctx.trim() : null
+  } catch { return null }
+}
+
+// Attempt to repair truncated/malformed JSON
 function repairJSON(str) {
+  // Fix missing values: "key":] or "key":} or "key":,
+  let s = str.replace(/":\s*([,\]\}])/g, '":""$1')
   // Remove trailing incomplete key-value pairs
-  let s = str.replace(/,\s*"[^"]*"?\s*:?\s*"?[^"]*$/, '')
+  s = s.replace(/,\s*"[^"]*"?\s*:?\s*"?[^"]*$/, '')
   // Remove trailing comma
   s = s.replace(/,\s*$/, '')
   // Count open/close brackets
@@ -110,22 +124,32 @@ export async function clearSummaryCache(userId) {
 
 // ─── GEMINI CALL (with retry) ────────────────────────────
 async function callGemini(prompt, { maxOutputTokens = 8192, temperature = 0.1, jsonMode = true, retries = 2 } = {}) {
-  const config = { temperature, maxOutputTokens }
-  if (jsonMode) config.responseMimeType = 'application/json'
+  const useProxy = !DIRECT_API_KEY
 
   let lastErr
   for (let attempt = 0; attempt <= retries; attempt++) {
     if (attempt > 0) await new Promise(r => setTimeout(r, 1000 * attempt))
 
     try {
-      const res = await fetch(API_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: config
+      let res
+      if (useProxy) {
+        res = await fetch(PROXY_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt, maxOutputTokens, temperature, jsonMode })
         })
-      })
+      } else {
+        const config = { temperature, maxOutputTokens }
+        if (jsonMode) config.responseMimeType = 'application/json'
+        res = await fetch(DIRECT_API_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: config
+          })
+        })
+      }
 
       if (res.status === 429 || res.status >= 500) {
         lastErr = new Error(`Gemini API ${res.status}`)
@@ -141,17 +165,36 @@ async function callGemini(prompt, { maxOutputTokens = 8192, temperature = 0.1, j
 
       const data = await res.json()
       const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '{}'
+      const finishReason = data?.candidates?.[0]?.finishReason
       const clean = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
+      if (finishReason === 'MAX_TOKENS') {
+        console.warn('Gemini response truncated (MAX_TOKENS) — attempting repair')
+      }
       try {
         let parsed = JSON.parse(clean)
         if (Array.isArray(parsed)) parsed = parsed[0] || {}
         return parsed
       } catch {
         // Try to repair truncated JSON by closing open structures
-        const repaired = repairJSON(clean)
-        let parsed = JSON.parse(repaired)
-        if (Array.isArray(parsed)) parsed = parsed[0] || {}
-        return parsed
+        try {
+          const repaired = repairJSON(clean)
+          let parsed = JSON.parse(repaired)
+          if (Array.isArray(parsed)) parsed = parsed[0] || {}
+          return parsed
+        } catch (repairErr) {
+          console.error('JSON repair failed, raw response:', clean.slice(-200))
+          // Last resort: try to extract partial valid JSON
+          const lastBrace = clean.lastIndexOf('}')
+          if (lastBrace > 0) {
+            const trimmed = repairJSON(clean.slice(0, lastBrace + 1))
+            try {
+              let parsed = JSON.parse(trimmed)
+              if (Array.isArray(parsed)) parsed = parsed[0] || {}
+              return parsed
+            } catch {}
+          }
+          throw repairErr
+        }
       }
     } catch (e) {
       if (e.message?.includes('Failed to fetch') || e.message?.includes('API 429') || e.message?.includes('API 5')) {
@@ -183,8 +226,13 @@ export async function extractDayData(entries, userId, cachedData, previousDays) 
       ).join('\n\n')}\n`
     : ''
 
-  const prompt = `Analyze this personal wellness journal day. Extract structured data for tracking.
+  const userContext = getUserContext()
+  const userContextBlock = userContext
+    ? `\nUSER CONTEXT (use this to better interpret entries):\n${userContext}\n`
+    : ''
 
+  const prompt = `Analyze this personal wellness journal day. Extract structured data for tracking.
+${userContextBlock}
 You MUST produce ALL THREE fields — never return null or empty strings.
 
 1. **summary**: 1-2 sentence overview of the day. What happened, how the person felt, key events.
@@ -223,7 +271,7 @@ Return JSON:
 }`
 
   try {
-    const result = await callGemini(prompt, { maxOutputTokens: 2048, temperature: 0.25 })
+    const result = await callGemini(prompt, { maxOutputTokens: 8192, temperature: 0.25 })
 
     let insight = result.insight || null
     if (!insight && Array.isArray(result.insights) && result.insights.length > 0) {
@@ -253,90 +301,313 @@ Return JSON:
   }
 }
 
-// ─── GLOBAL INSIGHTS (cross-day analysis) ────────────────
+// ─── GLOBAL REPORT (cross-day clinical analysis) ─────────
 export async function generateGlobalInsights(analyzedDays) {
-  // analyzedDays: [{ date, summary, insight, substances }]
+  // analyzedDays: [{ date, summary, insight, substances/factors }]
   if (!analyzedDays || analyzedDays.length === 0) {
     throw new Error('No analyzed days provided')
   }
 
-  const daysText = analyzedDays
-    .sort((a, b) => a.date.localeCompare(b.date))
+  const sorted = analyzedDays.sort((a, b) => a.date.localeCompare(b.date))
+
+  // Build rich day text with action types and details
+  const daysText = sorted
     .map(d => {
-      const substancesText = d.substances?.length
-        ? `\n  Substances: ${d.substances.map(s => `${s.name}${s.dose ? ' ' + s.dose : ''}`).join(', ')}`
+      const actions = d.substances || d.factors || []
+      const actionsText = actions.length
+        ? `\n  Actions: ${actions.map(a => {
+            if (typeof a === 'string') return a
+            const parts = [a.name]
+            if (a.type) parts.push(`[${a.type}]`)
+            if (a.detail) parts.push(`- ${a.detail}`)
+            if (a.time) parts.push(`at ${a.time}`)
+            return parts.join(' ')
+          }).join('; ')}`
         : ''
-      return `[${d.date}]\nSummary: ${d.summary}\nInsight: ${d.insight || 'none'}${substancesText}`
+      return `[${d.date}]\nSummary: ${d.summary}\nInsight: ${d.insight || 'none'}${actionsText}`
     })
     .join('\n\n')
 
-  const prompt = `You are analyzing a personal wellness journal across multiple days. Your task is to identify patterns, correlations, and provide actionable insights.
+  // Language detection from summaries
+  const sampleText = sorted.slice(0, 5).map(d => d.summary).join(' ')
+
+  const userContext = getUserContext()
+  const userContextBlock = userContext
+    ? `\nUSER CONTEXT (personal background, conditions, medications, and instructions on how to interpret data):\n${userContext}\n`
+    : ''
+
+  const prompt = `You are a clinical wellness analyst writing a comprehensive personal health & wellness report based on journal data.
+${userContextBlock}
+CRITICAL: Write the ENTIRE report in the SAME LANGUAGE as the day summaries below. Here is a sample of the language used: "${sampleText.slice(0, 200)}"
 
 ANALYZED DAYS (${analyzedDays.length} days):
 ${daysText}
 
-Analyze the data and provide:
+Write a thorough, clinical-style wellness report. Be specific — cite dates, names, quantities. This report should read like a document written by a personal health analyst, not a dashboard.
 
-1. **Cross-day correlations** between substances (medications, supplements, caffeine) and outcomes (mood, energy, productivity). Look for patterns like:
-   - Does a specific medication correlate with better/worse mood?
-   - Does caffeine intake correlate with sleep quality or anxiety?
-   - Are there temporal patterns (time of day effects)?
+Return JSON with these 8 fields:
 
-2. **Behavioral patterns**: How do activities (exercise, socializing, work, sleep) affect outcomes?
-   - Exercise → mood/energy changes
-   - Sleep quality → next-day performance
-   - Social interactions → emotional state
-
-3. **Medication effects over time**: Track any changes in medication and their observed effects on mood, energy, and overall wellbeing.
-
-4. **Temporal patterns**: Day-of-week effects, time-of-day patterns, cumulative effects over consecutive days.
-
-5. **Actionable recommendations**: Specific, evidence-based suggestions for improving wellbeing based on observed patterns.
-
-Be specific and cite examples from the data. If you see a pattern, mention the dates where it occurred.
-
-Return JSON:
 {
-  "summary": "3-5 sentence overall analysis of the person's wellness journey",
-  "mood_trend": "improving"|"stable"|"declining"|"fluctuating",
-  "patterns": [
+  "executive_summary": "4-6 sentence detailed assessment of the person's overall wellness trajectory, key patterns, and most important findings. Be specific and data-driven.",
+  "mood_trend": "improving|stable|declining|fluctuating",
+  "confirmed_observations": [
     {
-      "title": "concise pattern name",
-      "description": "detailed explanation with specific examples and dates",
-      "confidence": "high"|"medium"|"low"
+      "title": "concise observation name",
+      "detail": "2-4 sentences with specific dates and evidence. Explain the pattern clearly.",
+      "impact": "positive|negative|neutral"
     }
   ],
-  "correlations": [
+  "hypotheses": [
     {
-      "factor": "what causes the effect (e.g., 'Morning Elvanse dose')",
-      "effect": "observed outcome (e.g., 'increased focus until afternoon')",
-      "direction": "positive"|"negative",
-      "strength": "strong"|"moderate"|"weak",
-      "evidence": "brief mention of specific dates or examples"
+      "title": "hypothesis name",
+      "detail": "what you suspect and why",
+      "confidence_pct": 65,
+      "evidence_for": "supporting evidence with dates",
+      "evidence_against": "contradicting evidence or gaps",
+      "test_suggestion": "how to confirm or disprove this"
     }
   ],
-  "substance_effects": [
+  "medication_substance_analysis": [
     {
-      "substance": "medication/supplement name",
-      "observed_effects": "what you observed across days",
-      "mood_impact": "positive"|"negative"|"neutral"|"mixed",
-      "energy_impact": "positive"|"negative"|"neutral"|"mixed",
-      "consistency": "consistent"|"variable",
-      "notes": "any additional observations"
-    }
-  ],
-  "behavioral_insights": [
-    {
-      "behavior": "activity or habit (e.g., 'Exercise', 'Early wake-up')",
-      "impact": "observed effects on wellbeing",
-      "frequency": "how often it occurred",
-      "recommendation": "should they do more/less/maintain?"
+      "name": "substance name",
+      "type": "medication|supplement|caffeine|substance",
+      "frequency": "how often taken (e.g., 'daily', '3x/week')",
+      "observed_effects": "detailed effects observed across days (2-3 sentences)",
+      "mood_impact": "positive|negative|neutral|mixed",
+      "energy_impact": "positive|negative|neutral|mixed",
+      "focus_impact": "positive|negative|neutral|mixed|unknown",
+      "timing_notes": "when taken and how timing affects results",
+      "interactions": "notable interactions with other substances or activities",
+      "concerns": "any concerns or things to watch"
     }
   ],
   "recommendations": [
-    "specific, actionable recommendation based on the data"
+    {
+      "priority": "high|medium|low",
+      "action": "specific actionable recommendation",
+      "rationale": "why this matters, with data reference (dates, patterns)",
+      "expected_impact": "what improvement to expect"
+    }
+  ],
+  "ideal_routine": {
+    "description": "1-2 sentence overview of what the ideal day looks like based on the data",
+    "schedule": [
+      {
+        "time_block": "e.g., '7:00-8:00' or 'Morning'",
+        "activity": "what to do",
+        "rationale": "why, based on journal evidence"
+      }
+    ]
+  },
+  "experiments": [
+    {
+      "title": "experiment name",
+      "description": "what to try and how",
+      "duration": "e.g., '2 weeks'",
+      "measure": "how to measure success",
+      "hypothesis": "what you expect to happen"
+    }
   ]
-}`
+}
 
-  return await callGemini(prompt, { maxOutputTokens: 4096, temperature: 0.3, retries: 1 })
+Rules:
+- Every section must have at least 1 item (except ideal_routine.schedule which can be empty if insufficient data)
+- confirmed_observations: things you are confident about from the data
+- hypotheses: things that MIGHT be true but need more data — include confidence_pct (0-100)
+- medication_substance_analysis: ONLY substances/medications actually mentioned in the data
+- recommendations: ordered by priority (high first)
+- experiments: concrete self-experiments the person could run to test hypotheses
+- Be exhaustive and thorough — this is a clinical report, not a summary`
+
+  return await callGemini(prompt, { maxOutputTokens: 8192, temperature: 0.25, retries: 2 })
+}
+
+// ─── SMART REMINDERS (extract actionable items from entries) ─
+export async function generateReminders(entries, daySummaries) {
+  if (!entries || entries.length === 0) {
+    throw new Error('No entries provided')
+  }
+
+  // Use recent entries (last 14 days)
+  const today = new Date()
+  const cutoff = new Date(today)
+  cutoff.setDate(cutoff.getDate() - 14)
+  const cutoffStr = cutoff.toISOString().slice(0, 10)
+
+  const recentEntries = entries
+    .filter(e => e.entry_date >= cutoffStr)
+    .sort((a, b) => {
+      if (a.entry_date !== b.entry_date) return a.entry_date.localeCompare(b.entry_date)
+      return (a.entry_time || '').localeCompare(b.entry_time || '')
+    })
+
+  if (recentEntries.length === 0) {
+    throw new Error('No recent entries found')
+  }
+
+  const entriesText = recentEntries
+    .map(e => `[${e.entry_date} ${e.entry_time || ''}] ${e.text}`)
+    .join('\n')
+
+  // Add day summaries for context
+  const summariesText = Object.entries(daySummaries || {})
+    .filter(([date]) => date >= cutoffStr)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([date, d]) => `[${date}] ${d.summary || ''}`)
+    .join('\n')
+
+  // Language detection
+  const sampleText = recentEntries.slice(0, 5).map(e => e.text).join(' ')
+
+  const userContext = getUserContext()
+  const userContextBlock = userContext
+    ? `\nUSER CONTEXT (personal background, conditions, instructions):\n${userContext}\n`
+    : ''
+
+  const prompt = `You are a smart personal assistant analyzing journal entries to extract actionable items, answer questions, provide suggestions, and flag health alerts. You have deep knowledge and can provide genuinely useful, specific information.
+${userContextBlock}
+CRITICAL: Write EVERYTHING in the SAME LANGUAGE as the entries below. Here is a sample: "${sampleText.slice(0, 200)}"
+
+TODAY'S DATE: ${today.toISOString().slice(0, 10)}
+
+RECENT ENTRIES (last 14 days):
+${entriesText}
+
+${summariesText ? `DAY SUMMARIES:\n${summariesText}` : ''}
+
+Analyze ALL entries carefully and extract:
+
+1. **reminders**: Things the person mentioned needing to do, check, remember, buy, call, etc. Look for:
+   - Explicit: "devo", "ricordarmi", "non dimenticare", "I need to", "I should", "domani devo", "controllare", "verificare", "comprare"
+   - Implicit: mentioned plans, appointments, deadlines, things to research
+   - Recurring: things they do regularly but might have forgotten recently
+   For each reminder, if there's a concrete action the person can take (a search query, a link type, a specific step), include it in the "action_hint" field.
+
+2. **answers**: If the person wrote about wondering something, wanting to look something up, or asking themselves a question ("mi chiedo se...", "devo controllare...", "non so se...", "vorrei sapere..."):
+   - Provide a DETAILED, genuinely useful answer (3-5 sentences)
+   - Use your knowledge to give real information, not generic platitudes
+   - If the question is about health/medication, cite general medical knowledge
+   - If it's about a practical topic, give concrete steps
+   - Include a "search_query" field with a Google search query the person could use to learn more
+
+3. **suggestions**: Proactive, data-driven tips. Be SPECIFIC:
+   - Reference actual dates and entries ("On Feb 12 you felt great after...")
+   - Quantify patterns ("3 out of 5 days with exercise showed better mood")
+   - Give actionable next steps, not vague advice
+   - Positive reinforcement for good patterns
+   - Gentle nudges for gaps (missed medication, reduced activity)
+   - Cross-factor correlations ("caffeine after 3pm correlates with poor sleep entries")
+
+4. **alerts**: Health-related items requiring attention:
+   - Medication gaps with specific counts ("haven't mentioned X in Y days")
+   - Mood decline patterns with dates
+   - Sleep issues mentioned repeatedly
+   - Substance use patterns
+   - Any pattern that might warrant professional attention
+
+Return JSON:
+{
+  "reminders": [
+    {
+      "text": "what needs to be done",
+      "source_date": "YYYY-MM-DD",
+      "source_excerpt": "brief quote from the entry that triggered this",
+      "priority": "high|medium|low",
+      "action_hint": "optional: concrete next step, search query, or useful info to help complete this task"
+    }
+  ],
+  "answers": [
+    {
+      "question": "what the person was wondering about",
+      "answer": "detailed, genuinely useful answer (3-5 sentences with real information)",
+      "source_date": "YYYY-MM-DD",
+      "search_query": "optional Google search query for more info"
+    }
+  ],
+  "suggestions": [
+    {
+      "text": "specific, data-driven suggestion referencing dates and patterns",
+      "type": "positive|warning|info",
+      "based_on": "evidence from the entries (cite dates)"
+    }
+  ],
+  "alerts": [
+    {
+      "title": "alert title",
+      "detail": "detailed explanation with specific dates and evidence",
+      "severity": "high|medium|low"
+    }
+  ]
+}
+
+Rules:
+- Only include REAL reminders found in the text — don't invent tasks
+- For answers, provide GENUINELY useful information with real knowledge — no generic advice
+- Suggestions must cite specific dates and data from entries
+- Alerts should only flag genuinely concerning patterns
+- Each section can be empty [] if nothing relevant is found — don't force items
+- Be thorough — scan EVERY entry for potential reminders and questions
+- action_hint and search_query should be practical and immediately useful`
+
+  return await callGemini(prompt, { maxOutputTokens: 8192, temperature: 0.2, retries: 2 })
+}
+
+// ─── SMART PLACEHOLDER (context-aware input hints) ────────
+export async function generatePlaceholderHints(recentEntries) {
+  if (!recentEntries || recentEntries.length === 0) return null
+
+  const now = new Date()
+  const timeStr = now.toTimeString().slice(0, 5)
+
+  const sorted = [...recentEntries].sort((a, b) => {
+    const da = a.entry_date || ''; const db = b.entry_date || ''
+    if (da !== db) return da.localeCompare(db)
+    return (a.entry_time || '').localeCompare(b.entry_time || '')
+  })
+  const last5 = sorted
+    .slice(-5)
+    .map(e => `[${e.entry_date} ${e.entry_time || ''}] ${e.text}`)
+    .join('\n')
+
+  const userContext = getUserContext()
+  const userContextBlock = userContext
+    ? `\nUser context: ${userContext}\n`
+    : ''
+
+  const prompt = `You are a smart journaling assistant. Based on the user's recent entries and the current time of day, generate 6 SHORT prompts (max 55 chars each) to guide their next journal entry.
+
+Mix these types:
+- Questions about how they feel after something recent (medications, activities, events)
+- Reminders to track something useful (sleep quality, energy level, mood shift)
+- Follow-ups on recent context (plans mentioned, recurring patterns, goals)
+- Time-relevant prompts (morning→sleep/energy, afternoon→focus/mood, evening→reflection/gratitude)
+
+Rules:
+- SAME LANGUAGE as the entries
+- Each prompt must be DIFFERENT in topic and type
+- Warm and casual, like a friend checking in
+- Specific to their data — NOT generic ("How are you?", "How was your day?")
+- Short enough to fit as input placeholder text
+- For each hint, if it was inspired by a SPECIFIC entry, include that entry's date and time
+${userContextBlock}
+Current time: ${timeStr}
+
+Recent entries:
+${last5}
+
+Return JSON: {"hints": [{"text": "prompt text", "source_date": "YYYY-MM-DD or null", "source_time": "HH:MM or null"}, ...]}`
+
+  try {
+    const result = await callGemini(prompt, { maxOutputTokens: 4096, temperature: 0.6, retries: 1 })
+    const hints = result?.hints
+    if (Array.isArray(hints) && hints.length > 0) {
+      // Normalize: support both object and string formats
+      return hints.map(h => typeof h === 'string' ? { text: h } : h)
+    }
+    if (result?.hint) return [{ text: result.hint }]
+    return null
+  } catch (e) {
+    console.warn('Failed to generate placeholder hints:', e)
+    return null
+  }
 }

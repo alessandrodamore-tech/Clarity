@@ -3,6 +3,10 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useApp } from '../lib/store'
 import { ArrowLeft, RefreshCw, Loader2, Check, X, Plus } from 'lucide-react'
 import { extractDayData, loadCachedSummaries } from '../lib/gemini'
+import { TYPE_ICON, TYPE_COLORS } from '../lib/constants'
+import EditEntryModal from '../components/EditEntryModal'
+import EmptyState from '../components/EmptyState'
+import { FeatureHint } from '../components/Onboarding'
 
 const OVERRIDES_KEY = 'clarity_med_overrides'
 function loadOverrides() { try { return JSON.parse(localStorage.getItem(OVERRIDES_KEY) || '{}') } catch { return {} } }
@@ -22,21 +26,6 @@ function formatTime(entry) {
   return new Date(entry.created_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
 }
 
-const TYPE_ICON = {
-  medication: '💊', supplement: '🧬', caffeine: '☕', substance: '🍷',
-  exercise: '🏋️', wellness: '🧖', social: '👥', therapy: '🧠', other: '•',
-}
-const TYPE_COLORS = {
-  medication: { bg: 'rgba(139,92,246,0.18)', solidBg: 'rgba(139,92,246,0.28)', border: 'rgba(139,92,246,0.35)', accent: '#7c3aed' },
-  supplement: { bg: 'rgba(56,189,148,0.18)', solidBg: 'rgba(56,189,148,0.28)', border: 'rgba(56,189,148,0.35)', accent: '#0d9668' },
-  caffeine:   { bg: 'rgba(180,130,60,0.18)',  solidBg: 'rgba(180,130,60,0.28)',  border: 'rgba(180,130,60,0.35)',  accent: '#92600a' },
-  substance:  { bg: 'rgba(220,80,80,0.14)',   solidBg: 'rgba(220,80,80,0.22)',   border: 'rgba(220,80,80,0.28)',   accent: '#c04040' },
-  exercise:   { bg: 'rgba(59,130,246,0.14)',   solidBg: 'rgba(59,130,246,0.22)',  border: 'rgba(59,130,246,0.28)',  accent: '#2563eb' },
-  wellness:   { bg: 'rgba(168,85,247,0.14)',   solidBg: 'rgba(168,85,247,0.22)', border: 'rgba(168,85,247,0.28)', accent: '#7c3aed' },
-  social:     { bg: 'rgba(251,146,60,0.14)',   solidBg: 'rgba(251,146,60,0.22)', border: 'rgba(251,146,60,0.28)', accent: '#ea580c' },
-  therapy:    { bg: 'rgba(14,165,233,0.14)',   solidBg: 'rgba(14,165,233,0.22)', border: 'rgba(14,165,233,0.28)', accent: '#0284c7' },
-  other:      { bg: 'rgba(150,150,170,0.14)', solidBg: 'rgba(150,150,170,0.22)', border: 'rgba(150,150,170,0.28)', accent: '#6b6b80' },
-}
 
 function DayActions({ dayData, dateStr, overrides, onOverridesChange }) {
   const [addingNew, setAddingNew] = useState(false)
@@ -137,7 +126,6 @@ export default function DayDetail() {
   const [editText, setEditText] = useState('')
   const [editDate, setEditDate] = useState('')
   const [editTime, setEditTime] = useState('')
-  const [editingDateField, setEditingDateField] = useState(null)
   const [modalOrigin, setModalOrigin] = useState(null)
   const [modalClosing, setModalClosing] = useState(false)
 
@@ -226,13 +214,32 @@ export default function DayDetail() {
           <p style={{ margin: 0, fontSize: '0.85rem', lineHeight: 1.65, color: 'var(--text)' }}>{insight}</p>
         </div>
       ) : dayEntries.length > 0 && !isAnalyzed ? (
-        <button onClick={refreshDay} className="day-detail-analyze-btn">
-          <RefreshCw size={14} /> Analyze this day
-        </button>
+        <div className="glass" style={{
+          padding: 20, borderRadius: 'var(--radius)', marginBottom: 16,
+          textAlign: 'center',
+        }}>
+          <div style={{
+            fontSize: '0.88rem', color: 'var(--text-muted)', lineHeight: 1.6,
+            marginBottom: 14,
+          }}>
+            AI can summarize your day, find patterns, and extract wellness factors from your entries.
+          </div>
+          <button onClick={refreshDay} style={{
+            padding: '10px 24px', borderRadius: 100,
+            background: 'var(--amber)', color: '#fff', border: 'none',
+            fontFamily: 'var(--font-display)', fontWeight: 600,
+            fontSize: '0.85rem', cursor: 'pointer',
+            display: 'inline-flex', alignItems: 'center', gap: 8,
+            boxShadow: '0 2px 12px rgba(232,168,56,0.3)',
+            transition: 'transform 0.2s',
+          }}>
+            <RefreshCw size={14} /> Analyze this day
+          </button>
+        </div>
       ) : null}
 
       {/* ENTRIES */}
-      {dayEntries.length > 0 && (
+      {dayEntries.length > 0 ? (
         <div style={{ marginBottom: 20 }}>
           <h3 className="day-detail-section-title">Entries</h3>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -256,6 +263,14 @@ export default function DayDetail() {
             ))}
           </div>
         </div>
+      ) : (
+        <EmptyState
+          icon={'\uD83D\uDCDD'}
+          title="No entries this day"
+          description="Go to your feed to write about this day."
+          cta="Go to Feed"
+          onAction={() => navigate('/app')}
+        />
       )}
 
       {/* TRACKED FACTORS */}
@@ -263,71 +278,22 @@ export default function DayDetail() {
         <div style={{ marginBottom: 20 }}>
           <h3 className="day-detail-section-title">Tracked Factors</h3>
           <DayActions dayData={dayData} dateStr={date} overrides={medOverrides} onOverridesChange={handleOverridesChange} />
+          <FeatureHint id="factor-toggle">Tap any factor to toggle it on or off</FeatureHint>
         </div>
       )}
 
       {/* EDIT MODAL */}
-      {modal && (() => {
-        const o = modalOrigin
-        const targetW = Math.min(480, window.innerWidth - 40)
-        const targetH = 300
-        const targetX = (window.innerWidth - targetW) / 2
-        const targetY = (window.innerHeight - targetH) / 2
-        const fromTransform = o
-          ? `translate(${o.left - targetX}px, ${o.top - targetY}px) scale(${o.width / targetW}, ${o.height / targetH})`
-          : 'scale(0.9) translateY(30px)'
-        return (
-          <div style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }} onClick={closeModal}>
-            <div style={{
-              position: 'absolute', inset: 0, background: 'rgba(42,42,69,0.45)',
-              backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
-              animation: modalClosing ? 'modalBgOut 0.35s ease forwards' : 'modalBgIn 0.35s ease forwards',
-            }} />
-            <div onClick={e => e.stopPropagation()} style={{
-              position: 'relative', zIndex: 1, width: '100%', maxWidth: 480,
-              background: 'rgba(255,255,255,0.92)', borderRadius: 20, padding: 24,
-              boxShadow: '0 20px 60px rgba(0,0,0,0.15)', '--from-transform': fromTransform,
-              animation: modalClosing ? 'modalMorphOut 0.4s cubic-bezier(0.5,0,0.7,0.4) forwards' : 'modalMorphIn 0.5s cubic-bezier(0.16,1,0.3,1) forwards',
-            }}>
-              <div style={{
-                display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16,
-                animation: modalClosing ? 'modalContentOut 0.15s ease forwards' : 'modalContentIn 0.3s ease 0.25s forwards',
-                opacity: modalClosing ? 1 : 0,
-              }}>
-                <span style={{ fontSize: '0.75rem', color: '#9a9ab0', fontWeight: 600, fontFamily: 'var(--font-display)', display: 'flex', alignItems: 'center', gap: 4 }}>
-                  {editingDateField === 'date' ? (
-                    <input type="date" value={editDate} autoFocus onChange={e => setEditDate(e.target.value)} onBlur={() => setEditingDateField(null)}
-                      style={{ fontSize: '0.75rem', color: '#9a9ab0', fontFamily: 'var(--font-display)', fontWeight: 600, background: 'none', border: 'none', outline: 'none', padding: 0 }} />
-                  ) : <span onClick={() => setEditingDateField('date')} style={{ cursor: 'pointer' }}>{editDate}</span>}
-                  {' · '}
-                  {editingDateField === 'time' ? (
-                    <input type="time" value={editTime} autoFocus onChange={e => setEditTime(e.target.value)} onBlur={() => setEditingDateField(null)}
-                      style={{ fontSize: '0.75rem', color: '#9a9ab0', fontFamily: 'var(--font-display)', fontWeight: 600, background: 'none', border: 'none', outline: 'none', padding: 0 }} />
-                  ) : <span onClick={() => setEditingDateField('time')} style={{ cursor: 'pointer' }}>{editTime}</span>}
-                </span>
-                <button onClick={closeModal} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9a9ab0', padding: 2 }}><X size={16} /></button>
-              </div>
-              <textarea value={editText} onChange={e => setEditText(e.target.value)} style={{
-                width: '100%', minHeight: 160, padding: 0, border: 'none', background: 'none', outline: 'none',
-                fontSize: '0.95rem', lineHeight: 1.75, color: '#2a2a45', fontFamily: 'inherit', resize: 'vertical', marginBottom: 20,
-                animation: modalClosing ? 'modalContentOut 0.15s ease forwards' : 'modalContentIn 0.3s ease 0.2s forwards',
-                opacity: modalClosing ? 1 : 0,
-              }} />
-              <div style={{
-                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                animation: modalClosing ? 'modalContentOut 0.1s ease forwards' : 'modalContentIn 0.3s ease 0.3s forwards',
-                opacity: modalClosing ? 1 : 0,
-              }}>
-                <button onClick={handleDelete} style={{
-                  background: 'none', border: 'none', color: '#c4c4d4', fontSize: '0.78rem', fontWeight: 500,
-                  fontFamily: 'var(--font-display)', cursor: 'pointer', transition: 'color 0.2s',
-                }} onMouseEnter={e => e.target.style.color = '#dc3c3c'} onMouseLeave={e => e.target.style.color = '#c4c4d4'}>Delete</button>
-                <button className="btn-primary" onClick={handleSave} style={{ padding: '10px 28px', fontSize: '0.85rem' }}>Save</button>
-              </div>
-            </div>
-          </div>
-        )
-      })()}
+      <EditEntryModal
+        entry={modal}
+        modalOrigin={modalOrigin}
+        modalClosing={modalClosing}
+        editText={editText} setEditText={setEditText}
+        editDate={editDate} setEditDate={setEditDate}
+        editTime={editTime} setEditTime={setEditTime}
+        onClose={closeModal}
+        onSave={handleSave}
+        onDelete={handleDelete}
+      />
     </div>
   )
 }

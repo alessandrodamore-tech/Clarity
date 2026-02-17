@@ -3,8 +3,9 @@ import { useApp } from './lib/store'
 import Layout from './components/Layout'
 import Home from './pages/Home'
 import DayDetail from './pages/DayDetail'
-import Insights from './pages/Insights'
 import Trends from './pages/Trends'
+import Reminders from './pages/Reminders'
+import Profile from './pages/Profile'
 import Settings from './pages/Settings'
 import Import from './pages/Import'
 import Login from './pages/Login'
@@ -35,12 +36,14 @@ export default function App() {
         <Route index element={<Home />} />
         <Route path="home" element={<Home />} />
         <Route path="day/:date" element={<DayDetail />} />
-        <Route path="insights" element={<Insights />} />
+        <Route path="insights" element={<Navigate to="/app/trends" replace />} />
         <Route path="trends" element={<Trends />} />
+        <Route path="reminders" element={<Reminders />} />
+        <Route path="profile" element={<Profile />} />
         <Route path="factors" element={<Navigate to="/app/trends" replace />} />
         <Route path="settings" element={<Settings />} />
         <Route path="import" element={<Import />} />
-        <Route path="meds" element={<Navigate to="/app/home" replace />} />
+
       </Route>
       <Route path="*" element={<Navigate to="/app" replace />} />
     </Routes>
