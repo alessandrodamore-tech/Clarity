@@ -63,10 +63,10 @@ GEMINI_API_KEY=<gemini-api-key>                     # server-side only, used by 
 ### Pages (src/pages/)
 | File | What it does |
 |------|-------------|
-| `Home.jsx` | Main feed — continuous entries oldest→newest, fixed input bar at bottom (chat-style) with Trends/Reminders nav buttons flanking it, AI hint chips above input, send icon button |
+| `Home.jsx` | Main feed — continuous entries oldest→newest, fixed input bar at bottom (chat-style) with Trends/Reminders nav buttons flanking it, AI hint chips above input (with refresh button), send icon button |
 | `DayDetail.jsx` | Full day view: AI insight card, entries (click to edit), AI-extracted actions with manual overrides |
 | `Trends.jsx` | Orchestrator: WellnessHero (heatmap + stats), AnalysisReport (AI clinical report), DetailedStats (time distribution + day-of-week) |
-| `Reminders.jsx` | Smart AI-generated reminders, alerts, answers, suggestions. Auto-generates when entries change. Checkbox persistence + archive |
+| `Reminders.jsx` | Smart AI-generated reminders, alerts, answers, suggestions. Loads from cache instantly, never auto-regenerates. User-triggered updates via banner/button. Checkbox persistence + archive |
 | `Profile.jsx` | User info + AI context textarea. Context injected into ALL Gemini calls |
 | `Import.jsx` | Import wizard: text/CSV/Notion export/paste, preview, dedup, batch insert |
 | `Settings.jsx` | Profile + AI context + Notion sync + cache management + Import link + About + Sign Out (merged Profile+Settings) |
@@ -84,7 +84,7 @@ GEMINI_API_KEY=<gemini-api-key>                     # server-side only, used by 
 ### Components (src/components/)
 | File | What it does |
 |------|-------------|
-| `Layout.jsx` | Top bar: Settings/gear (left), "Clarity." (center), Help/? (right, re-triggers onboarding). Trends/Reminders in Home bottom bar |
+| `Layout.jsx` | Top bar: Settings/gear (left), "Clarity." (center), Help/? (right, re-triggers onboarding). Page transitions (opacity fade). Safe area support for iPhone. Trends/Reminders in Home bottom bar |
 | `EntryDetailModal.jsx` | Read-first entry modal with AI actions (Analyze, Ask anything). Edit mode via pencil icon. Replaced EditEntryModal.jsx |
 | `EmptyState.jsx` | Reusable empty state component |
 | `ErrorBoundary.jsx` | React error boundary with refresh fallback |
@@ -242,10 +242,7 @@ Re-scans all entries and finds reminders/suggestions/alerts/answers that were ov
 - `clarity_hints` — AI-generated input hint chips cache
 - `clarity_hints_ts` — timestamp of last hint generation
 - `clarity_reminders_processed_ids` — processed entry IDs for incremental reminders
-- `clarity_notion_token` — Notion integration token (internal, stored per-browser)
-- `clarity_notion_db_id` — Notion database ID
-- `clarity_notion_db_name` — Notion database display name
-- `clarity_notion_title_prop` — Notion title property name (auto-detected, e.g. "Annotazione")
+- `clarity_notion_creds` — Notion credentials JSON (token, databaseId, databaseName, titleProperty). Also persisted in Supabase user_metadata for cross-device
 - `clarity_notion_sync_map` — JSON map of clarity_id → notion_page_id (dedup tracker)
 
 ## Notion Sync
@@ -256,7 +253,7 @@ Re-scans all entries and finds reminders/suggestions/alerts/answers that were ov
 - **No Notion token on server** — token stored in user's localStorage, sent per-request to proxy
 
 ### Sync Behavior
-- **Clarity → Notion**: automatic. Every new entry auto-pushes via `autoSyncEntry()` (fire-and-forget in `store.jsx`)
+- **Clarity → Notion**: automatic. Every new entry auto-pushes via `autoSyncEntry()` (fire-and-forget in `store.jsx`, 1.5s delay to ensure credentials are hydrated)
 - **Notion → Clarity**: automatic on app load (once per session via `useRef`), plus manual pull in Settings
 - **Dedup**: text-based (case-insensitive trim comparison) + sync map (clarity_id → notion_page_id) + within-pull dedup
 - **Delete**: deleting entry from Clarity does NOT delete from Notion (Notion acts as backup)
@@ -280,7 +277,7 @@ Re-scans all entries and finds reminders/suggestions/alerts/answers that were ov
 - **Home = minimal AI** — entries, input, and AI hint chips above input (context-aware suggestions). All deep analysis lives in Trends/DayDetail/Reminders
 - **Feed order = chat-style** — oldest at top, newest at bottom, input fixed at bottom
 - **Day separators** in feed as glass pills (Today, Yesterday, or formatted date)
-- **On-demand analysis only** — user clicks ↻ per day or "Analyze all" in Settings. Reminders auto-generate
+- **On-demand analysis only** — user clicks ↻ per day or "Analyze all" in Settings. Reminders are user-triggered (never auto-regenerate on page open)
 - **Single API call per day** — summary + insight + actions together
 - **Actions not "Substances"** — right column tracks everything wellness-relevant
 - **Top bar simplified** — Profile (left), Clarity. (center), Settings (right)
@@ -288,7 +285,10 @@ Re-scans all entries and finds reminders/suggestions/alerts/answers that were ov
 - **Glass morphism** — frosted glass cards, not flat/material design
 - **User context everywhere** — Profile page context injected into all 3 AI functions
 - **Multilingual AI** — reports and reminders written in the same language as user entries
-- **Incremental reminders** — only new entries are processed, results merged with existing
+- **Reminders never auto-regenerate** — loads from cache instantly. Shows "X new entries — tap to update" banner when new entries exist. Full refresh via button. Incremental updates merge with existing data
+- **Page transitions** — opacity fade (no transform — `transform` breaks `position: fixed` on Safari)
+- **iPhone safe areas** — `viewport-fit=cover` + `env(safe-area-inset-*)` for top bar, bottom input bar, and feed padding
+- **Notion credentials cross-device** — stored in Supabase `user_metadata`, hydrated via `getUser()` (not just JWT session which can be stale)
 - **Supabase as source of truth** — localStorage is cache, Supabase wins on load, fire-and-forget saves
 - **Gemini proxy in production** — `/api/gemini` serverless function hides API key from client bundle
 - **Landing page + SPA** — `index.html` = landing, `app.html` = React SPA, split during build via `vercel.json`
@@ -301,8 +301,14 @@ Re-scans all entries and finds reminders/suggestions/alerts/answers that were ov
 - [x] ~~Onboarding accessible anytime~~ — DONE in v0.3 (HelpCircle icon in Layout top-right)
 - [x] ~~Merge Profile + Settings~~ — DONE in v0.3 (single Settings page, gear icon left, ? icon right)
 - [x] ~~Notion two-way sync~~ — DONE in v0.3 (auto-push on new entry, auto-pull on app load, manual push/pull/cleanup in Settings)
+- [x] ~~Hint chips refresh button~~ — DONE in v0.3.1 (RefreshCw icon as first chip in tray)
+- [x] ~~Page transitions~~ — DONE in v0.3.1 (opacity fade, no transform to preserve position:fixed)
+- [x] ~~iPhone safe areas~~ — DONE in v0.3.1 (viewport-fit=cover, env() safe area insets)
+- [x] ~~Landing page mobile fix~~ — DONE in v0.3.1 (nav logo size, hero height)
+- [x] ~~Reminders auto-regeneration bug~~ — DONE in v0.3.1 (never auto-regenerate, user-triggered only)
+- [x] ~~Notion credentials cross-device~~ — DONE in v0.3.1 (getUser() for fresh metadata)
 - [ ] `entries_source_check` constraint only accepts 'manual' — should also accept 'import', 'notion'
-- [ ] Mobile responsive needs more testing
+- [ ] `user_reminders` table may not exist on Supabase — run migration SQL to create it for cross-device persistence
 - [ ] Rate limiting for "Analyze all" — some days fail with 429
 - [ ] Push notifications for reminders (currently in-app only)
 
