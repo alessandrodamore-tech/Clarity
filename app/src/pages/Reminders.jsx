@@ -99,6 +99,7 @@ export default function Reminders() {
   const [mounted, setMounted] = useState(false)
   const [daySummaries, setDaySummaries] = useState({})
   const [doneSet, setDoneSet] = useState(loadDoneSet)
+  const [supabaseLoaded, setSupabaseLoaded] = useState(false)
 
   useEffect(() => {
     window.scrollTo(0, 0)
@@ -116,33 +117,48 @@ export default function Reminders() {
     loadCachedSummaries(user.id).then(cache => setDaySummaries(cache))
   }, [user])
 
-  // Load reminders from Supabase (wins over localStorage)
+  // Load reminders from Supabase (wins over localStorage) — must complete before auto-generate
   useEffect(() => {
-    if (!user?.id) return
+    if (!user?.id) { setSupabaseLoaded(true); return }
     supabase
       .from('user_reminders')
       .select('reminders_data, done_items, processed_ids, entries_hash')
       .eq('user_id', user.id)
       .maybeSingle()
       .then(({ data: row }) => {
-        if (!row) return
-        if (row.reminders_data) {
-          setData(row.reminders_data)
-          try { localStorage.setItem(CACHE_KEY, JSON.stringify(row.reminders_data)) } catch {}
-        }
-        if (row.done_items) {
-          const set = new Set(row.done_items)
-          setDoneSet(set)
-          try { localStorage.setItem(DONE_KEY, JSON.stringify(row.done_items)) } catch {}
-        }
-        if (row.processed_ids) {
-          try { localStorage.setItem(PROCESSED_IDS_KEY, JSON.stringify(row.processed_ids)) } catch {}
-        }
-        if (row.entries_hash) {
-          try { localStorage.setItem(HASH_KEY, row.entries_hash) } catch {}
+        if (row) {
+          if (row.reminders_data) {
+            setData(row.reminders_data)
+            try { localStorage.setItem(CACHE_KEY, JSON.stringify(row.reminders_data)) } catch {}
+          }
+          if (row.done_items) {
+            const set = new Set(row.done_items)
+            setDoneSet(set)
+            try { localStorage.setItem(DONE_KEY, JSON.stringify(row.done_items)) } catch {}
+          }
+          if (row.processed_ids) {
+            try { localStorage.setItem(PROCESSED_IDS_KEY, JSON.stringify(row.processed_ids)) } catch {}
+          }
+          if (row.entries_hash) {
+            try { localStorage.setItem(HASH_KEY, row.entries_hash) } catch {}
+          }
         }
       })
+      .finally(() => setSupabaseLoaded(true))
   }, [user])
+
+  // Sync processedIds with current entry IDs when reminders already exist
+  // This prevents unnecessary regeneration when entry IDs changed (e.g. after Notion re-import)
+  useEffect(() => {
+    if (!supabaseLoaded || !data || !entries?.length) return
+    const processedIds = loadProcessedIds()
+    const currentIds = new Set(entries.map(e => e.id))
+    // If most current entries are "unprocessed" but we already have data, re-sync IDs
+    const unprocessedCount = entries.filter(e => !processedIds.has(e.id)).length
+    if (unprocessedCount > entries.length * 0.5 && data.reminders?.length > 0) {
+      saveProcessedIds(currentIds, user?.id)
+    }
+  }, [supabaseLoaded, data, entries?.length])
 
   // Compute entries hash (last 14 days)
   const recentHash = useMemo(() => {
@@ -209,8 +225,9 @@ export default function Reminders() {
   }, [entries, daySummaries, recentHash, loading])
 
   // Auto-generate: first visit = full, then only incremental for new entries
+  // MUST wait for Supabase to load first to avoid regenerating cached data
   useEffect(() => {
-    if (!recentHash || !entries?.length || loading) return
+    if (!supabaseLoaded || !recentHash || !entries?.length || loading) return
     const hasCache = !!loadCachedReminders()
     if (!hasCache) {
       generate(false) // first time ever — full generation
@@ -223,7 +240,7 @@ export default function Reminders() {
       const hasNew = entries.some(e => e.entry_date >= cutoffStr && !processedIds.has(e.id))
       if (hasNew) generate(true) // incremental only — merge, never replace
     }
-  }, [recentHash, entries?.length]) // intentionally not including generate to avoid loops
+  }, [supabaseLoaded, recentHash, entries?.length]) // intentionally not including generate to avoid loops
 
   const scanMissed = useCallback(async () => {
     if (!entries?.length || scanning || loading) return
