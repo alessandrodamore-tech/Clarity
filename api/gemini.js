@@ -14,7 +14,7 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'prompt is required' })
   }
 
-  const model = 'gemini-2.0-flash'
+  const model = 'gemini-3-pro-preview'
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`
 
   const config = { temperature, maxOutputTokens }
