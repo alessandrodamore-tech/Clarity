@@ -1,5 +1,6 @@
-import { createContext, useContext, useState, useEffect, useCallback } from 'react'
+import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react'
 import { supabase } from './supabase'
+import { autoSyncEntry, getNotionCredentials, pullFromNotion } from './notion'
 
 const AppContext = createContext(null)
 
@@ -67,7 +68,7 @@ export function AppProvider({ children }) {
       .single()
     
     if (!error && data) {
-      setEntries(prev => [{
+      const newEntry = {
         id: data.id,
         text: data.raw_text,
         created_at: `${data.entry_date}T${data.entry_time}`,
@@ -77,7 +78,10 @@ export function AppProvider({ children }) {
         mood: null,
         energy: null,
         tags: [],
-      }, ...prev])
+      }
+      setEntries(prev => [newEntry, ...prev])
+      // Auto-sync to Notion (fire-and-forget)
+      autoSyncEntry({ id: data.id, text: data.raw_text })
     }
     return { data, error }
   }
@@ -111,6 +115,42 @@ export function AppProvider({ children }) {
     }
     return { error }
   }
+
+  // Auto-pull new entries from Notion on app load (once per session)
+  const notionPulled = useRef(false)
+  useEffect(() => {
+    if (!user || entriesLoading || entries.length === 0 || notionPulled.current) return
+    const { token, databaseId } = getNotionCredentials()
+    if (!token || !databaseId) return
+    notionPulled.current = true
+
+    pullFromNotion(token, databaseId, entries).then(async (newEntries) => {
+      for (const entry of newEntries) {
+        const { data, error } = await supabase
+          .from('entries')
+          .insert({
+            user_id: user.id,
+            raw_text: entry.text,
+            entry_date: entry.entry_date,
+            entry_time: entry.entry_time,
+            source: 'notion',
+          })
+          .select()
+          .single()
+        if (!error && data) {
+          setEntries(prev => [...prev, {
+            id: data.id,
+            text: data.raw_text,
+            created_at: `${data.entry_date}T${data.entry_time}`,
+            entry_date: data.entry_date,
+            entry_time: data.entry_time,
+            source: data.source,
+            mood: null, energy: null, tags: [],
+          }])
+        }
+      }
+    }).catch(() => { /* silent fail */ })
+  }, [user, entriesLoading])
 
   // Insights cache — persisted in localStorage
   const [insightsData, setInsightsData] = useState(() => {

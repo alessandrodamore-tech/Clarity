@@ -1,20 +1,37 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { User, Upload, Info, LogOut, Trash2, Check } from 'lucide-react'
+import { User, Upload, Info, LogOut, Trash2, Check, RefreshCw, Link2, Unlink, ArrowUpFromLine, ArrowDownToLine } from 'lucide-react'
 import { useApp } from '../lib/store'
 import { supabase } from '../lib/supabase'
 import { clearSummaryCache, loadCachedSummaries } from '../lib/gemini'
+import { getNotionCredentials, saveNotionCredentials, clearNotionCredentials, testNotionConnection, pushToNotion, pullFromNotion, cleanupNotionDuplicates } from '../lib/notion'
 import { FeatureHint } from '../components/Onboarding'
+
+const CONTEXT_KEY = 'clarity_user_context'
 
 export default function Settings() {
   const navigate = useNavigate()
-  const { user, setUser, entries } = useApp()
+  const { user, setUser, entries, addEntry, fetchEntries } = useApp()
 
   const [displayName, setDisplayName] = useState('')
   const [timezone, setTimezone] = useState('')
   const [saved, setSaved] = useState(false)
   const [clearing, setClearing] = useState(false)
   const [analyzedCount, setAnalyzedCount] = useState(0)
+  const [context, setContext] = useState('')
+  const [contextSaved, setContextSaved] = useState(false)
+
+  // Notion sync state
+  const [notionToken, setNotionToken] = useState('')
+  const [notionDbId, setNotionDbId] = useState('')
+  const [notionConnected, setNotionConnected] = useState(false)
+  const [notionDbName, setNotionDbName] = useState('')
+  const [notionTesting, setNotionTesting] = useState(false)
+  const [notionSyncing, setNotionSyncing] = useState(false)
+  const [notionPulling, setNotionPulling] = useState(false)
+  const [notionMsg, setNotionMsg] = useState(null)
+  const [notionProgress, setNotionProgress] = useState('')
+  const [notionCleaning, setNotionCleaning] = useState(false)
 
   useEffect(() => {
     if (!user) return
@@ -29,6 +46,25 @@ export default function Settings() {
       setAnalyzedCount(Object.keys(cache).length)
     })
   }, [user])
+
+  // Load AI context from localStorage
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(CONTEXT_KEY)
+      if (stored) setContext(stored)
+    } catch {}
+  }, [])
+
+  // Load Notion credentials
+  useEffect(() => {
+    const creds = getNotionCredentials()
+    if (creds.token && creds.databaseId) {
+      setNotionToken(creds.token)
+      setNotionDbId(creds.databaseId)
+      setNotionDbName(creds.databaseName)
+      setNotionConnected(true)
+    }
+  }, [])
 
   const journeyStats = useMemo(() => {
     const totalEntries = entries?.length || 0
@@ -70,6 +106,129 @@ export default function Settings() {
     if (!error) {
       setSaved(true)
       setTimeout(() => setSaved(false), 2000)
+    }
+  }
+
+  const handleSaveContext = () => {
+    try {
+      if (context.trim()) {
+        localStorage.setItem(CONTEXT_KEY, context.trim())
+      } else {
+        localStorage.removeItem(CONTEXT_KEY)
+      }
+      setContextSaved(true)
+      setTimeout(() => setContextSaved(false), 2000)
+    } catch {}
+  }
+
+  const handleNotionConnect = async () => {
+    if (!notionToken.trim() || !notionDbId.trim()) {
+      setNotionMsg({ type: 'error', text: 'Token and Database ID are required' })
+      return
+    }
+    setNotionTesting(true)
+    setNotionMsg(null)
+    try {
+      const result = await testNotionConnection(notionToken.trim(), notionDbId.trim())
+      saveNotionCredentials(notionToken.trim(), notionDbId.trim(), result.title, result.title_property)
+      setNotionDbName(result.title)
+      setNotionConnected(true)
+      setNotionMsg({ type: 'success', text: `Connected to "${result.title}"` })
+    } catch (e) {
+      setNotionMsg({ type: 'error', text: e.message })
+    } finally {
+      setNotionTesting(false)
+    }
+  }
+
+  const handleNotionDisconnect = () => {
+    clearNotionCredentials()
+    setNotionToken('')
+    setNotionDbId('')
+    setNotionDbName('')
+    setNotionConnected(false)
+    setNotionMsg(null)
+  }
+
+  const handleNotionPush = async () => {
+    if (!entries?.length) {
+      setNotionMsg({ type: 'error', text: 'No entries to sync' })
+      return
+    }
+    setNotionSyncing(true)
+    setNotionMsg(null)
+    setNotionProgress('')
+    try {
+      const result = await pushToNotion(
+        notionToken, notionDbId, entries,
+        (done, total) => setNotionProgress(`${done}/${total}`)
+      )
+      setNotionProgress('')
+      if (result.pushed === 0) {
+        setNotionMsg({ type: 'success', text: `All ${result.alreadySynced} entries already synced` })
+      } else {
+        setNotionMsg({ type: 'success', text: `Pushed ${result.pushed} new entries to Notion` })
+      }
+    } catch (e) {
+      setNotionMsg({ type: 'error', text: e.message })
+      setNotionProgress('')
+    } finally {
+      setNotionSyncing(false)
+    }
+  }
+
+  const handleNotionPull = async () => {
+    setNotionPulling(true)
+    setNotionMsg(null)
+    try {
+      const newEntries = await pullFromNotion(notionToken, notionDbId, entries || [])
+      if (newEntries.length === 0) {
+        setNotionMsg({ type: 'success', text: 'No new entries found in Notion' })
+      } else {
+        // Insert directly via supabase (NOT addEntry) to avoid re-pushing to Notion
+        let imported = 0
+        for (const entry of newEntries) {
+          const { data, error } = await supabase
+            .from('entries')
+            .insert({
+              user_id: user.id,
+              raw_text: entry.text,
+              entry_date: entry.entry_date,
+              entry_time: entry.entry_time,
+              source: 'notion',
+            })
+            .select()
+            .single()
+          if (!error && data) imported++
+        }
+        // Refresh entries list from DB
+        await fetchEntries()
+        setNotionMsg({ type: 'success', text: `Imported ${imported} entries from Notion` })
+      }
+    } catch (e) {
+      setNotionMsg({ type: 'error', text: e.message })
+    } finally {
+      setNotionPulling(false)
+    }
+  }
+
+  const handleNotionCleanup = async () => {
+    if (!confirm('This will archive duplicate pages in your Notion database (keeps the oldest copy). Continue?')) return
+    setNotionCleaning(true)
+    setNotionMsg(null)
+    setNotionProgress('')
+    try {
+      const result = await cleanupNotionDuplicates(
+        notionToken, notionDbId,
+        (done, total) => setNotionProgress(`${done}/${total}`)
+      )
+      setNotionProgress('')
+      setNotionMsg({ type: 'success', text: `Done! Found ${result.duplicates} duplicates, archived ${result.archived}. ${result.total - result.duplicates} unique pages remain.` })
+    } catch (e) {
+      setNotionMsg({ type: 'error', text: e.message })
+      setNotionProgress('')
+    } finally {
+      setNotionCleaning(false)
     }
   }
 
@@ -132,6 +291,75 @@ export default function Settings() {
         </button>
       </div>
 
+      {/* AI Context */}
+      <div className="glass" style={{ borderRadius: 'var(--radius-lg)', padding: 24 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+          <Info size={18} style={{ color: 'var(--navy)' }} />
+          <h2 style={{ fontFamily: 'var(--font-display)', fontSize: '1.1rem', fontWeight: 700, color: 'var(--navy)', margin: 0 }}>AI Context</h2>
+        </div>
+        <p style={{
+          color: 'var(--text-muted)', fontSize: '0.82rem', lineHeight: 1.7,
+          margin: '0 0 16px',
+        }}>
+          Write anything that helps the AI understand your entries better. This context is included in every analysis.
+        </p>
+
+        {/* Hint */}
+        <div style={{
+          padding: '12px 14px', borderRadius: 10, marginBottom: 16,
+          background: 'rgba(232,168,56,0.06)',
+          border: '1px solid rgba(232,168,56,0.12)',
+        }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+            <Info size={14} style={{ color: 'var(--amber)', flexShrink: 0, marginTop: 2 }} />
+            <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', lineHeight: 1.7 }}>
+              <strong style={{ color: 'var(--text)' }}>Examples of what to include:</strong>
+              <ul style={{ margin: '6px 0 0', paddingLeft: 16 }}>
+                <li>Medical conditions (e.g., "I have ADHD, diagnosed in 2023")</li>
+                <li>Current medications and dosages</li>
+                <li>Personal abbreviations or nicknames you use in entries</li>
+                <li>Goals you're working toward</li>
+                <li>Context about your life situation (student, work schedule, etc.)</li>
+                <li>How you want the AI to interpret your entries (e.g., "when I write 'la solita' I mean Elvanse 30mg")</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        <textarea
+          className="glass-textarea"
+          placeholder="E.g.: I'm a 21-year-old university student with ADHD. I take Elvanse 30mg every morning and Sertralina 50mg. When I write 'la pastiglia' I mean Elvanse. I'm trying to exercise 3x/week and reduce caffeine..."
+          value={context}
+          onChange={e => setContext(e.target.value)}
+          rows={8}
+          style={{
+            width: '100%', resize: 'vertical', marginBottom: 16,
+            fontSize: '0.88rem', lineHeight: 1.7,
+            minHeight: 160,
+          }}
+        />
+
+        <button
+          className="btn-primary"
+          onClick={handleSaveContext}
+          style={{
+            width: '100%', display: 'flex', alignItems: 'center',
+            justifyContent: 'center', gap: 8,
+          }}
+        >
+          {contextSaved ? <><Check size={16} /> Saved</> : 'Save Context'}
+        </button>
+
+        {context.trim() && (
+          <p style={{
+            margin: '12px 0 0', fontSize: '0.72rem', color: 'var(--text-light)',
+            textAlign: 'center',
+          }}>
+            This context will be included in all AI analyses (daily, trends, reminders).
+          </p>
+        )}
+      </div>
+
       {/* Import */}
       <div className="glass" style={{ borderRadius: 'var(--radius-lg)', padding: 24 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
@@ -144,6 +372,178 @@ export default function Settings() {
         <button onClick={() => navigate('/app/import')} className="btn-primary" style={{ width: '100%' }}>
           Import Entries
         </button>
+      </div>
+
+      {/* Notion Sync */}
+      <div className="glass" style={{ borderRadius: 'var(--radius-lg)', padding: 24 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+          <Link2 size={18} style={{ color: 'var(--navy)' }} />
+          <h2 style={{ fontFamily: 'var(--font-display)', fontSize: '1.1rem', fontWeight: 700, color: 'var(--navy)', margin: 0, flex: 1 }}>Notion Sync</h2>
+          {notionConnected && (
+            <span style={{
+              fontSize: '0.68rem', fontWeight: 600, color: '#3a8a6a',
+              padding: '2px 8px', borderRadius: 100,
+              background: 'rgba(58,138,106,0.1)',
+            }}>Connected</span>
+          )}
+        </div>
+        <p style={{ color: 'var(--text-muted)', fontSize: '0.82rem', lineHeight: 1.7, margin: '0 0 16px' }}>
+          Sync your journal entries with a Notion database. Two-way: push entries to Notion, or import from Notion.
+        </p>
+
+        {!notionConnected ? (
+          <>
+            {/* Setup instructions */}
+            <div style={{
+              padding: '12px 14px', borderRadius: 10, marginBottom: 16,
+              background: 'rgba(232,168,56,0.06)',
+              border: '1px solid rgba(232,168,56,0.12)',
+            }}>
+              <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', lineHeight: 1.7 }}>
+                <strong style={{ color: 'var(--text)' }}>Setup:</strong>
+                <ol style={{ margin: '6px 0 0', paddingLeft: 18 }}>
+                  <li>Go to <strong>notion.so/my-integrations</strong> and create an integration</li>
+                  <li>Copy the <strong>Internal Integration Token</strong></li>
+                  <li>In Notion, open your journal database and click <strong>Share → Invite</strong> → add the integration</li>
+                  <li>Copy the <strong>Database ID</strong> from the database URL (the 32-char string after the workspace name)</li>
+                </ol>
+              </div>
+            </div>
+
+            <label style={{ fontSize: '0.82rem', color: 'var(--text-muted)', fontWeight: 500, display: 'block', marginBottom: 6 }}>Integration Token</label>
+            <input
+              className="glass-input"
+              type="password"
+              placeholder="ntn_..."
+              value={notionToken}
+              onChange={e => setNotionToken(e.target.value)}
+              style={{ marginBottom: 12 }}
+            />
+
+            <label style={{ fontSize: '0.82rem', color: 'var(--text-muted)', fontWeight: 500, display: 'block', marginBottom: 6 }}>Database ID</label>
+            <input
+              className="glass-input"
+              placeholder="abc123def456..."
+              value={notionDbId}
+              onChange={e => setNotionDbId(e.target.value)}
+              style={{ marginBottom: 16 }}
+            />
+
+            <button
+              className="btn-primary"
+              onClick={handleNotionConnect}
+              disabled={notionTesting}
+              style={{
+                width: '100%', display: 'flex', alignItems: 'center',
+                justifyContent: 'center', gap: 8,
+                opacity: notionTesting ? 0.6 : 1,
+              }}
+            >
+              {notionTesting ? <><RefreshCw size={14} style={{ animation: 'spin 1s linear infinite' }} /> Testing...</> : <><Link2 size={14} /> Connect</>}
+            </button>
+          </>
+        ) : (
+          <>
+            {/* Connected state */}
+            <div style={{
+              padding: '12px 14px', borderRadius: 10, marginBottom: 16,
+              background: 'rgba(58,138,106,0.06)',
+              border: '1px solid rgba(58,138,106,0.12)',
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            }}>
+              <div>
+                <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text)' }}>{notionDbName || 'Notion Database'}</div>
+                <div style={{ fontSize: '0.72rem', color: 'var(--text-light)', marginTop: 2 }}>ID: {notionDbId.slice(0, 8)}...</div>
+              </div>
+              <button
+                onClick={handleNotionDisconnect}
+                style={{
+                  background: 'none', border: 'none', cursor: 'pointer',
+                  color: 'var(--text-light)', display: 'flex', alignItems: 'center', gap: 4,
+                  fontSize: '0.72rem', fontWeight: 600,
+                }}
+              >
+                <Unlink size={12} /> Disconnect
+              </button>
+            </div>
+
+            {/* Sync buttons */}
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button
+                onClick={handleNotionPush}
+                disabled={notionSyncing || notionPulling}
+                style={{
+                  flex: 1, padding: '11px 16px', borderRadius: 'var(--radius)',
+                  background: 'rgba(42,42,69,0.85)', color: '#fff',
+                  border: 'none', cursor: notionSyncing ? 'wait' : 'pointer',
+                  fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: '0.82rem',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                  opacity: (notionSyncing || notionPulling) ? 0.6 : 1,
+                  transition: 'all 0.2s',
+                }}
+              >
+                {notionSyncing ? (
+                  <><RefreshCw size={13} style={{ animation: 'spin 1s linear infinite' }} /> {notionProgress || 'Pushing...'}</>
+                ) : (
+                  <><ArrowUpFromLine size={13} /> Push to Notion</>
+                )}
+              </button>
+
+              <button
+                onClick={handleNotionPull}
+                disabled={notionSyncing || notionPulling}
+                style={{
+                  flex: 1, padding: '11px 16px', borderRadius: 'var(--radius)',
+                  background: 'rgba(255,255,255,0.15)', color: 'var(--text)',
+                  border: '1px solid rgba(255,255,255,0.3)',
+                  cursor: notionPulling ? 'wait' : 'pointer',
+                  fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: '0.82rem',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                  opacity: (notionSyncing || notionPulling) ? 0.6 : 1,
+                  transition: 'all 0.2s',
+                }}
+              >
+                {notionPulling ? (
+                  <><RefreshCw size={13} style={{ animation: 'spin 1s linear infinite' }} /> Pulling...</>
+                ) : (
+                  <><ArrowDownToLine size={13} /> Pull from Notion</>
+                )}
+              </button>
+            </div>
+
+            {/* Cleanup duplicates */}
+            <button
+              onClick={handleNotionCleanup}
+              disabled={notionSyncing || notionPulling || notionCleaning}
+              style={{
+                marginTop: 10, width: '100%', padding: '10px 16px', borderRadius: 'var(--radius)',
+                background: 'rgba(232,168,56,0.08)', color: 'var(--amber)',
+                border: '1px solid rgba(232,168,56,0.2)',
+                cursor: notionCleaning ? 'wait' : 'pointer',
+                fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: '0.78rem',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                opacity: (notionSyncing || notionPulling || notionCleaning) ? 0.6 : 1,
+                transition: 'all 0.2s',
+              }}
+            >
+              {notionCleaning ? (
+                <><RefreshCw size={12} style={{ animation: 'spin 1s linear infinite' }} /> Cleaning {notionProgress || '...'}</>
+              ) : (
+                <><Trash2 size={12} /> Clean Notion Duplicates</>
+              )}
+            </button>
+          </>
+        )}
+
+        {/* Status message */}
+        {notionMsg && (
+          <div style={{
+            marginTop: 12, padding: '10px 14px', borderRadius: 10, fontSize: '0.82rem',
+            background: notionMsg.type === 'error' ? 'rgba(255,80,80,0.12)' : 'rgba(58,138,106,0.1)',
+            color: notionMsg.type === 'error' ? '#dc3c3c' : '#3a8a6a',
+            border: `1px solid ${notionMsg.type === 'error' ? 'rgba(255,80,80,0.2)' : 'rgba(58,138,106,0.2)'}`,
+          }}>{notionMsg.text}</div>
+        )}
       </div>
 
       {/* Data */}
@@ -174,7 +574,7 @@ export default function Settings() {
       {/* About */}
       <div className="glass" style={{ borderRadius: 'var(--radius-lg)', padding: 24, textAlign: 'center' }}>
         <Info size={18} style={{ color: 'var(--text-light)', marginBottom: 8 }} />
-        <p style={{ color: 'var(--text-light)', fontSize: '0.85rem' }}>Clarity v0.1 — Your mind, decoded.</p>
+        <p style={{ color: 'var(--text-light)', fontSize: '0.85rem' }}>Clarity v0.3 — Your mind, decoded.</p>
       </div>
 
       {/* Your Journey */}

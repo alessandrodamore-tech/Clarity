@@ -5,7 +5,6 @@ import Home from './pages/Home'
 import DayDetail from './pages/DayDetail'
 import Trends from './pages/Trends'
 import Reminders from './pages/Reminders'
-import Profile from './pages/Profile'
 import Settings from './pages/Settings'
 import Import from './pages/Import'
 import Login from './pages/Login'
@@ -39,7 +38,7 @@ export default function App() {
         <Route path="insights" element={<Navigate to="/app/trends" replace />} />
         <Route path="trends" element={<Trends />} />
         <Route path="reminders" element={<Reminders />} />
-        <Route path="profile" element={<Profile />} />
+        <Route path="profile" element={<Navigate to="/app/settings" replace />} />
         <Route path="factors" element={<Navigate to="/app/trends" replace />} />
         <Route path="settings" element={<Settings />} />
         <Route path="import" element={<Import />} />

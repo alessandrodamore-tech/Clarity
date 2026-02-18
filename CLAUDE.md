@@ -30,6 +30,7 @@ A smart mental health journal. Write freely about your day — AI extracts patte
 - **Backend**: Supabase (auth, Postgres, RLS)
 - **AI**: Google Gemini API (`gemini-3-pro-preview`) for per-day analysis + cross-day reports + smart reminders + smart hints
 - **Styling**: Custom CSS with glass morphism design system (CSS variables, `className="glass"`)
+- **Deployment**: Vercel (auto-deploy from GitHub, serverless API proxy for Gemini)
 - **No TypeScript** — plain JSX
 
 ## Run
@@ -41,11 +42,21 @@ npx vite --host --port 5173
 ```
 
 ## Environment Variables
+
+### Local development (app/.env)
 ```
 VITE_SUPABASE_URL=https://<project>.supabase.co
 VITE_SUPABASE_ANON_KEY=<anon-key>
 VITE_GEMINI_API_KEY=<gemini-api-key>
 ```
+
+### Vercel production
+```
+VITE_SUPABASE_URL=https://<project>.supabase.co    # baked into client bundle (safe — public key)
+VITE_SUPABASE_ANON_KEY=<anon-key>                  # baked into client bundle (safe — RLS protected)
+GEMINI_API_KEY=<gemini-api-key>                     # server-side only, used by /api/gemini proxy
+```
+**DO NOT set `VITE_GEMINI_API_KEY` on Vercel** — it would expose the key in the client bundle. The app auto-detects: if `VITE_GEMINI_API_KEY` is missing, it routes through the `/api/gemini` serverless proxy.
 
 ## Architecture
 
@@ -58,22 +69,23 @@ VITE_GEMINI_API_KEY=<gemini-api-key>
 | `Reminders.jsx` | Smart AI-generated reminders, alerts, answers, suggestions. Auto-generates when entries change. Checkbox persistence + archive |
 | `Profile.jsx` | User info + AI context textarea. Context injected into ALL Gemini calls |
 | `Import.jsx` | Import wizard: text/CSV/Notion export/paste, preview, dedup, batch insert |
-| `Settings.jsx` | Cache management, Import link, About, Sign Out |
+| `Settings.jsx` | Profile + AI context + Notion sync + cache management + Import link + About + Sign Out (merged Profile+Settings) |
 | `Login.jsx` | Auth (login/signup) with Supabase |
 
 ### Core Libraries (src/lib/)
 | File | What it does |
 |------|-------------|
-| `gemini.js` | All AI logic: `callGemini()`, `extractDayData()`, `generateGlobalInsights()`, `generateReminders()`, `generatePlaceholderHints()`, `getUserContext()`, `loadCachedSummaries()`, `clearSummaryCache()`, `analyzeAllEntries()` |
-| `store.jsx` | React context: auth state, entries CRUD, `useApp()` hook |
+| `gemini.js` | All AI logic: `callGemini()`, `extractDayData()`, `generateGlobalInsights()`, `generateReminders()`, `generatePlaceholderHints()`, `analyzeEntry()`, `findMissedReminders()`, `getUserContext()`, `loadCachedSummaries()`, `clearSummaryCache()` |
+| `notion.js` | Notion two-way sync: `testNotionConnection()`, `pushToNotion()`, `pullFromNotion()`, `autoSyncEntry()`, `cleanupNotionDuplicates()`, credential management, sync map |
+| `store.jsx` | React context: auth state, entries CRUD, `useApp()` hook, auto-sync to Notion on addEntry, auto-pull from Notion on app load |
 | `supabase.js` | Supabase client init |
 | `constants.js` | Shared constants |
 
 ### Components (src/components/)
 | File | What it does |
 |------|-------------|
-| `Layout.jsx` | Top bar: Profile (left), "Clarity." (center), Settings (right). Simplified — Trends/Reminders moved to Home bottom bar |
-| `EditEntryModal.jsx` | Full-screen modal for editing entries (text, date, time) with delete option |
+| `Layout.jsx` | Top bar: Settings/gear (left), "Clarity." (center), Help/? (right, re-triggers onboarding). Trends/Reminders in Home bottom bar |
+| `EntryDetailModal.jsx` | Read-first entry modal with AI actions (Analyze, Ask anything). Edit mode via pencil icon. Replaced EditEntryModal.jsx |
 | `EmptyState.jsx` | Reusable empty state component |
 | `ErrorBoundary.jsx` | React error boundary with refresh fallback |
 | `Onboarding.jsx` | First-time user onboarding flow |
@@ -120,6 +132,31 @@ updated_at timestamptz DEFAULT now()
 UNIQUE(user_id, entry_date)
 ```
 - RLS enabled
+
+### `user_reports` table (v0.3)
+```sql
+id uuid PK DEFAULT gen_random_uuid()
+user_id uuid FK → auth.users NOT NULL
+report_data jsonb NOT NULL DEFAULT '{}'
+created_at timestamptz DEFAULT now()
+updated_at timestamptz DEFAULT now()
+UNIQUE(user_id)
+```
+- RLS enabled. Stores the Trends page AI clinical report. Persists across devices.
+
+### `user_reminders` table (v0.3)
+```sql
+id uuid PK DEFAULT gen_random_uuid()
+user_id uuid FK → auth.users NOT NULL
+reminders_data jsonb NOT NULL DEFAULT '{}'
+done_items jsonb NOT NULL DEFAULT '[]'
+processed_ids jsonb NOT NULL DEFAULT '[]'
+entries_hash text
+created_at timestamptz DEFAULT now()
+updated_at timestamptz DEFAULT now()
+UNIQUE(user_id)
+```
+- RLS enabled. Stores reminders, done state, and processed entry IDs. Persists across devices.
 
 ## AI / Gemini Details
 
@@ -169,10 +206,24 @@ Context-aware input hints for Home. Returns array of `{text, source_date, source
 - Clicking a hint with source scrolls to and highlights the referenced entry
 - Config: `maxOutputTokens: 4096`, `temperature: 0.6`, `retries: 1`
 
+### `analyzeEntry(entry, actionType, question)` (v0.3)
+Per-entry AI analysis. Returns **prose** (not JSON).
+- `actionType`: `'analyze'` (deep analysis) or `'ask'` (answer user question about entry)
+- Injects user context, responds in same language as entry
+- Config: `maxOutputTokens: 4096`, `temperature: 0.3`, `jsonMode: false`, `retries: 1`
+
+### `findMissedReminders(entries, existingData)` (v0.3)
+Re-scans all entries and finds reminders/suggestions/alerts/answers that were overlooked.
+- Sends existing items to AI so it doesn't repeat them
+- Returns same JSON format as `generateReminders` (only new items)
+- Config: `maxOutputTokens: 8192`, `temperature: 0.2`, `retries: 1`
+
 ### `callGemini(prompt, options)`
 - Retries with backoff on 429/5xx
 - JSON repair for truncated responses (`repairJSON` function)
 - **Handles array responses**: `if (Array.isArray(parsed)) parsed = parsed[0]` — critical fix
+- **`jsonMode: false`** skips JSON.parse, returns raw prose text
+- Routes through `/api/gemini` proxy when `VITE_GEMINI_API_KEY` is not set (production)
 - Temperature: 0.2 for structured output
 
 ### Action Types
@@ -191,6 +242,39 @@ Context-aware input hints for Home. Returns array of `{text, source_date, source
 - `clarity_hints` — AI-generated input hint chips cache
 - `clarity_hints_ts` — timestamp of last hint generation
 - `clarity_reminders_processed_ids` — processed entry IDs for incremental reminders
+- `clarity_notion_token` — Notion integration token (internal, stored per-browser)
+- `clarity_notion_db_id` — Notion database ID
+- `clarity_notion_db_name` — Notion database display name
+- `clarity_notion_title_prop` — Notion title property name (auto-detected, e.g. "Annotazione")
+- `clarity_notion_sync_map` — JSON map of clarity_id → notion_page_id (dedup tracker)
+
+## Notion Sync
+
+### Architecture
+- **Proxy**: `/api/notion.js` serverless function (Vercel) + dev middleware in `vite.config.js`
+- **Frontend**: `src/lib/notion.js` — credential management, sync map, push/pull/cleanup functions
+- **No Notion token on server** — token stored in user's localStorage, sent per-request to proxy
+
+### Sync Behavior
+- **Clarity → Notion**: automatic. Every new entry auto-pushes via `autoSyncEntry()` (fire-and-forget in `store.jsx`)
+- **Notion → Clarity**: automatic on app load (once per session via `useRef`), plus manual pull in Settings
+- **Dedup**: text-based (case-insensitive trim comparison) + sync map (clarity_id → notion_page_id) + within-pull dedup
+- **Delete**: deleting entry from Clarity does NOT delete from Notion (Notion acts as backup)
+- **Pull inserts directly via Supabase** (not `addEntry`) to avoid re-pushing pulled entries to Notion
+
+### Database Mapping
+- Entry text → title property (auto-detected, e.g. "Annotazione")
+- Date/time → `page.created_time` (Notion's automatic timestamp, accurate since sync is real-time)
+- No extra columns needed in Notion database
+
+### Proxy Actions
+| Action | What it does |
+|--------|-------------|
+| `test` | Validates token + database_id, returns DB title + title property name |
+| `query` | Paginates all pages sorted by `created_time` desc |
+| `push` | Creates pages with entry text in title property (batches of 10, 350ms rate limit) |
+| `archive` | Soft-deletes a Notion page (recoverable for 30 days) |
+| `update` | PATCH page properties |
 
 ## Design Decisions
 - **Home = minimal AI** — entries, input, and AI hint chips above input (context-aware suggestions). All deep analysis lives in Trends/DayDetail/Reminders
@@ -205,36 +289,49 @@ Context-aware input hints for Home. Returns array of `{text, source_date, source
 - **User context everywhere** — Profile page context injected into all 3 AI functions
 - **Multilingual AI** — reports and reminders written in the same language as user entries
 - **Incremental reminders** — only new entries are processed, results merged with existing
+- **Supabase as source of truth** — localStorage is cache, Supabase wins on load, fire-and-forget saves
+- **Gemini proxy in production** — `/api/gemini` serverless function hides API key from client bundle
+- **Landing page + SPA** — `index.html` = landing, `app.html` = React SPA, split during build via `vercel.json`
 
 ## Known Issues / TODO
 - [x] ~~Trends page needs visual rebuild~~ — DONE in v0.2 (AnalysisReport)
-- [ ] **Per-entry AI actions** — tapping an entry should show AI options (analyze, extract reminders, summarize, etc.) — NEXT PRIORITY
-- [ ] Notion sync not implemented (import only, no live sync)
+- [x] ~~Per-entry AI actions~~ — DONE in v0.3 (EntryDetailModal: Analyze + Ask anything)
+- [x] ~~Deploy to Vercel~~ — DONE in v0.3 (clarity-dusky.vercel.app)
+- [x] ~~Supabase persistence for reports/reminders~~ — DONE in v0.3
+- [x] ~~Onboarding accessible anytime~~ — DONE in v0.3 (HelpCircle icon in Layout top-right)
+- [x] ~~Merge Profile + Settings~~ — DONE in v0.3 (single Settings page, gear icon left, ? icon right)
+- [x] ~~Notion two-way sync~~ — DONE in v0.3 (auto-push on new entry, auto-pull on app load, manual push/pull/cleanup in Settings)
 - [ ] `entries_source_check` constraint only accepts 'manual' — should also accept 'import', 'notion'
 - [ ] Mobile responsive needs more testing
 - [ ] Rate limiting for "Analyze all" — some days fail with 429
-- [ ] Deploy to Vercel (currently localhost only)
 - [ ] Push notifications for reminders (currently in-app only)
 
 ## Repo Structure
 ```
 clarity/
 ├── CLAUDE.md          ← you are here
+├── package.json       ← root (type: module for Vercel serverless)
 ├── vercel.json        ← Vercel deployment config
-├── api/               ← serverless API functions
+├── index.html         ← landing page (copied to app/public/landing.html for build)
+├── supabase_migration_v0.3.sql  ← DB migration for user_reports + user_reminders
+├── api/
+│   ├── gemini.js      ← serverless Gemini API proxy (hides API key)
+│   └── notion.js      ← serverless Notion API proxy (CORS bypass, actions: test/query/push/archive/update)
 ├── app/
 │   ├── .env           ← API keys (git-ignored)
 │   ├── .env.example
-│   ├── index.html
+│   ├── index.html     ← SPA entry point
 │   ├── package.json
 │   ├── vite.config.js
+│   ├── public/
+│   │   └── landing.html  ← landing page (becomes index.html in build)
 │   └── src/
 │       ├── main.jsx
 │       ├── App.jsx        ← routes
 │       ├── index.css      ← all styles
 │       ├── components/
 │       │   ├── Layout.jsx
-│       │   ├── EditEntryModal.jsx
+│       │   ├── EntryDetailModal.jsx  ← read-first modal with AI actions
 │       │   ├── EmptyState.jsx
 │       │   ├── ErrorBoundary.jsx
 │       │   ├── Onboarding.jsx
@@ -244,7 +341,8 @@ clarity/
 │       │       └── DetailedStats.jsx
 │       ├── lib/
 │       │   ├── gemini.js  ← AI logic
-│       │   ├── store.jsx  ← state management
+│       │   ├── notion.js  ← Notion sync logic
+│       │   ├── store.jsx  ← state management + auto-sync
 │       │   ├── constants.js
 │       │   └── supabase.js
 │       └── pages/
@@ -256,5 +354,4 @@ clarity/
 │           ├── Import.jsx
 │           ├── Settings.jsx
 │           └── Login.jsx
-└── docs/              ← landing page (GitHub Pages)
 ```
