@@ -188,8 +188,13 @@ export async function cleanupNotionDuplicates(token, databaseId, onProgress) {
 export async function pullFromNotion(token, databaseId, existingEntries) {
   const syncMap = loadSyncMap()
   const syncedNotionIds = new Set(Object.values(syncMap))
-  // Build a set of existing texts (trimmed, lowercase) for dedup
-  const existingTexts = new Set((existingEntries || []).map(e => (e.text || '').trim().toLowerCase()))
+  // Build text→clarityId lookup for matching existing entries
+  const textToId = {}
+  for (const e of (existingEntries || [])) {
+    const key = (e.text || '').trim().toLowerCase()
+    if (key) textToId[key] = e.id
+  }
+  const existingTexts = new Set(Object.keys(textToId))
 
   let allPages = []
   let cursor = null
@@ -211,6 +216,7 @@ export async function pullFromNotion(token, databaseId, existingEntries) {
   }
 
   // Filter pages not already in Clarity
+  let syncMapDirty = false
   const newEntries = []
   for (const page of allPages) {
     // Check if we already synced this Notion page
@@ -225,7 +231,15 @@ export async function pullFromNotion(token, databaseId, existingEntries) {
 
     // Skip if same text already exists in Clarity or already seen in this pull
     const textKey = text.trim().toLowerCase()
-    if (existingTexts.has(textKey)) continue
+    if (existingTexts.has(textKey)) {
+      // Register in sync map so push knows this Clarity entry is already on Notion
+      const clarityId = textToId[textKey]
+      if (clarityId && !syncMap[clarityId]) {
+        syncMap[clarityId] = page.id
+        syncMapDirty = true
+      }
+      continue
+    }
     existingTexts.add(textKey) // dedup within Notion results too
 
     // Use page.created_time for date and time
@@ -240,6 +254,9 @@ export async function pullFromNotion(token, databaseId, existingEntries) {
       notion_page_id: page.id,
     })
   }
+
+  // Save sync map if we discovered existing matches
+  if (syncMapDirty) saveSyncMap(syncMap)
 
   return newEntries
 }
