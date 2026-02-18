@@ -213,7 +213,7 @@ body {
 }
 @keyframes pageFadeIn {
   from { opacity: 0; transform: translateY(16px) scale(0.98); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
+  to { opacity: 1; transform: none; }
 }
 
 /* === ENTRY ITEMS === */
@@ -1127,11 +1127,12 @@ body {
     font-size: 0.85rem;
   }
   .feed-input-bar {
-    padding: 0 8px;
+    padding: 0;
     padding-bottom: max(8px, env(safe-area-inset-bottom, 8px));
   }
   .bottom-bar-row {
     gap: 6px;
+    padding: 0 8px;
   }
   .bottom-nav-btn {
     width: 40px;
