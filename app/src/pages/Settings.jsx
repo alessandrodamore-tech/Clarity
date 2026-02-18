@@ -4,7 +4,7 @@ import { User, Upload, Info, LogOut, Trash2, Check, RefreshCw, Link2, Unlink, Ar
 import { useApp } from '../lib/store'
 import { supabase } from '../lib/supabase'
 import { clearSummaryCache, loadCachedSummaries } from '../lib/gemini'
-import { getNotionCredentials, saveNotionCredentials, clearNotionCredentials, testNotionConnection, pushToNotion, pullFromNotion, cleanupNotionDuplicates } from '../lib/notion'
+import { getNotionCredentials, saveNotionCredentials, clearNotionCredentials, loadNotionCredentialsFromUser, testNotionConnection, pushToNotion, pullFromNotion, cleanupNotionDuplicates } from '../lib/notion'
 import { FeatureHint } from '../components/Onboarding'
 
 const CONTEXT_KEY = 'clarity_user_context'
@@ -55,16 +55,17 @@ export default function Settings() {
     } catch {}
   }, [])
 
-  // Load Notion credentials
+  // Load Notion credentials from user metadata (Supabase) or localStorage cache
   useEffect(() => {
-    const creds = getNotionCredentials()
+    if (!user) return
+    const creds = loadNotionCredentialsFromUser(user) || getNotionCredentials()
     if (creds.token && creds.databaseId) {
       setNotionToken(creds.token)
       setNotionDbId(creds.databaseId)
       setNotionDbName(creds.databaseName)
       setNotionConnected(true)
     }
-  }, [])
+  }, [user])
 
   const journeyStats = useMemo(() => {
     const totalEntries = entries?.length || 0
@@ -130,7 +131,7 @@ export default function Settings() {
     setNotionMsg(null)
     try {
       const result = await testNotionConnection(notionToken.trim(), notionDbId.trim())
-      saveNotionCredentials(notionToken.trim(), notionDbId.trim(), result.title, result.title_property)
+      await saveNotionCredentials(notionToken.trim(), notionDbId.trim(), result.title, result.title_property)
       setNotionDbName(result.title)
       setNotionConnected(true)
       setNotionMsg({ type: 'success', text: `Connected to "${result.title}"` })
@@ -141,8 +142,8 @@ export default function Settings() {
     }
   }
 
-  const handleNotionDisconnect = () => {
-    clearNotionCredentials()
+  const handleNotionDisconnect = async () => {
+    await clearNotionCredentials()
     setNotionToken('')
     setNotionDbId('')
     setNotionDbName('')

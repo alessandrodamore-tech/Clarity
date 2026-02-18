@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react'
 import { supabase } from './supabase'
-import { autoSyncEntry, getNotionCredentials, pullFromNotion } from './notion'
+import { autoSyncEntry, getNotionCredentials, pullFromNotion, loadNotionCredentialsFromUser } from './notion'
 
 const AppContext = createContext(null)
 
@@ -13,8 +13,11 @@ export function AppProvider({ children }) {
   // Auth
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null)
+      const u = session?.user ?? null
+      setUser(u)
       setLoading(false)
+      // Hydrate Notion credentials from user metadata into localStorage
+      if (u) loadNotionCredentialsFromUser(u)
     })
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {

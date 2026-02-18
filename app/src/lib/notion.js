@@ -1,44 +1,42 @@
+import { supabase } from './supabase'
+
 const PROXY_URL = '/api/notion'
-const TOKEN_KEY = 'clarity_notion_token'
-const DB_KEY = 'clarity_notion_db_id'
 const SYNC_MAP_KEY = 'clarity_notion_sync_map'
-const DB_NAME_KEY = 'clarity_notion_db_name'
-const TITLE_PROP_KEY = 'clarity_notion_title_prop'
 
-// ─── CREDENTIALS ─────────────────────────────────────────
+// ─── CREDENTIALS (stored in Supabase user metadata) ─────
 export function getNotionCredentials() {
+  // Read from localStorage cache (populated on login/save)
   try {
-    return {
-      token: localStorage.getItem(TOKEN_KEY) || '',
-      databaseId: localStorage.getItem(DB_KEY) || '',
-      databaseName: localStorage.getItem(DB_NAME_KEY) || '',
-      titleProperty: localStorage.getItem(TITLE_PROP_KEY) || 'Annotazione',
-    }
-  } catch {
-    return { token: '', databaseId: '', databaseName: '', titleProperty: 'Annotazione' }
-  }
-}
-
-export function saveNotionCredentials(token, databaseId, databaseName, titleProperty) {
-  try {
-    if (token) localStorage.setItem(TOKEN_KEY, token)
-    else localStorage.removeItem(TOKEN_KEY)
-    if (databaseId) localStorage.setItem(DB_KEY, databaseId)
-    else localStorage.removeItem(DB_KEY)
-    if (databaseName) localStorage.setItem(DB_NAME_KEY, databaseName)
-    else localStorage.removeItem(DB_NAME_KEY)
-    if (titleProperty) localStorage.setItem(TITLE_PROP_KEY, titleProperty)
+    const cached = localStorage.getItem('clarity_notion_creds')
+    if (cached) return JSON.parse(cached)
   } catch {}
+  return { token: '', databaseId: '', databaseName: '', titleProperty: 'Annotazione' }
 }
 
-export function clearNotionCredentials() {
+export async function saveNotionCredentials(token, databaseId, databaseName, titleProperty) {
+  const creds = { token: token || '', databaseId: databaseId || '', databaseName: databaseName || '', titleProperty: titleProperty || 'Annotazione' }
+  // Cache locally for immediate reads
+  try { localStorage.setItem('clarity_notion_creds', JSON.stringify(creds)) } catch {}
+  // Persist to Supabase user metadata
+  await supabase.auth.updateUser({ data: { notion_creds: creds } })
+}
+
+export async function clearNotionCredentials() {
   try {
-    localStorage.removeItem(TOKEN_KEY)
-    localStorage.removeItem(DB_KEY)
-    localStorage.removeItem(DB_NAME_KEY)
-    localStorage.removeItem(TITLE_PROP_KEY)
+    localStorage.removeItem('clarity_notion_creds')
     localStorage.removeItem(SYNC_MAP_KEY)
   } catch {}
+  await supabase.auth.updateUser({ data: { notion_creds: null } })
+}
+
+// Load credentials from Supabase user metadata into localStorage cache
+export function loadNotionCredentialsFromUser(user) {
+  const creds = user?.user_metadata?.notion_creds
+  if (creds?.token && creds?.databaseId) {
+    try { localStorage.setItem('clarity_notion_creds', JSON.stringify(creds)) } catch {}
+    return creds
+  }
+  return null
 }
 
 // ─── SYNC MAP (clarity_id → notion_page_id) ─────────────
