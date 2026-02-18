@@ -148,18 +148,15 @@ export default function Reminders() {
       .finally(() => setSupabaseLoaded(true))
   }, [user])
 
-  // Sync processedIds with current entry IDs when reminders already exist
-  // This prevents unnecessary regeneration when entry IDs changed (e.g. after Notion re-import)
-  useEffect(() => {
-    if (!supabaseLoaded || !data || !entries?.length) return
+  // Count new (unprocessed) entries for the "update available" banner
+  const newEntryCount = useMemo(() => {
+    if (!entries?.length) return 0
     const processedIds = loadProcessedIds()
-    const currentIds = new Set(entries.map(e => e.id))
-    // If most current entries are "unprocessed" but we already have data, re-sync IDs
-    const unprocessedCount = entries.filter(e => !processedIds.has(e.id)).length
-    if (unprocessedCount > entries.length * 0.5 && data.reminders?.length > 0) {
-      saveProcessedIds(currentIds, user?.id)
-    }
-  }, [supabaseLoaded, data, entries?.length])
+    const cutoff = new Date()
+    cutoff.setDate(cutoff.getDate() - 14)
+    const cutoffStr = cutoff.toISOString().slice(0, 10)
+    return entries.filter(e => e.entry_date >= cutoffStr && !processedIds.has(e.id)).length
+  }, [entries])
 
   // Compute entries hash (last 14 days)
   const recentHash = useMemo(() => {
@@ -227,23 +224,15 @@ export default function Reminders() {
     }
   }, [entries, daySummaries, recentHash, loading, updating])
 
-  // Auto-generate: first visit = full, then only incremental for new entries
-  // MUST wait for Supabase to load first to avoid regenerating cached data
+  // Only auto-generate on FIRST EVER visit (no cached data at all).
+  // All subsequent updates are user-triggered via Refresh or the "new entries" banner.
+  const autoGenDone = useRef(false)
   useEffect(() => {
-    if (!supabaseLoaded || !recentHash || !entries?.length || loading) return
+    if (autoGenDone.current || !supabaseLoaded || !entries?.length || loading || updating) return
+    autoGenDone.current = true
     const hasCache = !!loadCachedReminders()
-    if (!hasCache) {
-      generate(false) // first time ever — full generation
-    } else {
-      // Check if there are unprocessed entries → integrate incrementally
-      const processedIds = loadProcessedIds()
-      const cutoff = new Date()
-      cutoff.setDate(cutoff.getDate() - 14)
-      const cutoffStr = cutoff.toISOString().slice(0, 10)
-      const hasNew = entries.some(e => e.entry_date >= cutoffStr && !processedIds.has(e.id))
-      if (hasNew) generate(true) // incremental only — merge, never replace
-    }
-  }, [supabaseLoaded, recentHash, entries?.length]) // intentionally not including generate to avoid loops
+    if (!hasCache) generate(false)
+  }, [supabaseLoaded, entries?.length])
 
   const scanMissed = useCallback(async () => {
     if (!entries?.length || scanning || loading) return
@@ -337,6 +326,24 @@ export default function Reminders() {
           </div>
         )}
       </div>
+
+      {/* New entries banner */}
+      {!loading && !updating && data && newEntryCount > 0 && (
+        <button
+          onClick={() => generate(true)}
+          style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+            width: '100%', padding: '10px 16px', marginBottom: 16,
+            borderRadius: 14, border: '1px solid rgba(232,168,56,0.2)',
+            background: 'rgba(232,168,56,0.08)', cursor: 'pointer',
+            color: 'var(--amber)', fontSize: '0.82rem',
+            fontFamily: 'var(--font-display)', fontWeight: 600,
+          }}
+        >
+          <Bell size={14} />
+          {newEntryCount} new {newEntryCount === 1 ? 'entry' : 'entries'} — tap to update
+        </button>
+      )}
 
       {/* Loading */}
       {loading && (
