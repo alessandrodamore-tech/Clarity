@@ -1,0 +1,796 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Clarity — Your mind, decoded.</title>
+    <meta name="description" content="Write freely about your day. Clarity's AI extracts patterns, generates reminders, and builds clinical reports you can share with your specialist.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --navy: #2a2a45;
+            --teal: #3a5a6a;
+            --teal-light: #4a7a8a;
+            --amber: #e8a838;
+            --amber-light: #f0c060;
+            --text: #2e2e48;
+            --text-muted: #6a6a88;
+            --text-light: #9a9ab0;
+            --white: #ffffff;
+            --radius: 20px;
+            --radius-lg: 28px;
+            --font-display: 'Outfit', -apple-system, sans-serif;
+            --font-body: -apple-system, BlinkMacSystemFont, 'Outfit', sans-serif;
+
+            --glass-bg: rgba(255, 255, 255, 0.2);
+            --glass-border: rgba(255, 255, 255, 0.5);
+            --glass-blur: blur(24px) saturate(190%);
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html { scroll-behavior: smooth; font-size: 16px; }
+
+        body {
+            font-family: var(--font-body);
+            color: var(--text);
+            line-height: 1.6;
+            overflow-x: hidden;
+            -webkit-font-smoothing: antialiased;
+            min-height: 100vh;
+        }
+
+        /* === DREAMY PASTEL BACKGROUND === */
+        .bg-mesh {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            z-index: 0;
+            background:
+                radial-gradient(ellipse 80% 60% at 15% 25%, rgba(210, 170, 230, 0.7) 0%, transparent 60%),
+                radial-gradient(ellipse 70% 50% at 75% 15%, rgba(170, 200, 240, 0.65) 0%, transparent 55%),
+                radial-gradient(ellipse 60% 50% at 50% 55%, rgba(245, 200, 180, 0.5) 0%, transparent 55%),
+                radial-gradient(ellipse 80% 60% at 85% 75%, rgba(180, 215, 235, 0.55) 0%, transparent 55%),
+                radial-gradient(ellipse 60% 40% at 25% 80%, rgba(240, 190, 210, 0.5) 0%, transparent 50%),
+                radial-gradient(ellipse 50% 40% at 60% 85%, rgba(200, 180, 230, 0.4) 0%, transparent 50%);
+            background-color: #ede4f0;
+            animation: meshDrift 25s ease-in-out infinite alternate;
+        }
+        @keyframes meshDrift {
+            0% { filter: hue-rotate(0deg) brightness(1.0); }
+            33% { filter: hue-rotate(8deg) brightness(1.03); }
+            66% { filter: hue-rotate(-5deg) brightness(1.01); }
+            100% { filter: hue-rotate(3deg) brightness(1.02); }
+        }
+
+        /* === LIQUID GLASS === */
+        .glass {
+            background: var(--glass-bg);
+            backdrop-filter: var(--glass-blur);
+            -webkit-backdrop-filter: var(--glass-blur);
+            border: 1px solid var(--glass-border);
+            border-radius: var(--radius);
+            box-shadow:
+                0 8px 32px rgba(100, 80, 160, 0.08),
+                inset 0 1px 0 rgba(255, 255, 255, 0.7),
+                inset 0 -1px 0 rgba(255, 255, 255, 0.15);
+            position: relative;
+            overflow: hidden;
+        }
+        .glass::before {
+            content: '';
+            position: absolute;
+            top: 0; left: -20%; right: -20%;
+            height: 55%;
+            background: linear-gradient(180deg,
+                rgba(255, 255, 255, 0.45) 0%,
+                rgba(255, 255, 255, 0.12) 40%,
+                transparent 100%);
+            border-radius: var(--radius) var(--radius) 50% 50%;
+            pointer-events: none;
+            z-index: 1;
+        }
+        .glass::after {
+            content: '';
+            position: absolute;
+            bottom: 0; left: 10%; right: 10%;
+            height: 40%;
+            background: linear-gradient(0deg,
+                rgba(255, 255, 255, 0.1) 0%,
+                transparent 100%);
+            pointer-events: none;
+            z-index: 1;
+        }
+        .glass > * { position: relative; z-index: 2; }
+
+        /* === REVEAL === */
+        .reveal {
+            opacity: 0;
+            transform: translateY(24px);
+            transition: opacity 0.9s cubic-bezier(0.16, 1, 0.3, 1),
+                        transform 0.9s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        .reveal.visible { opacity: 1; transform: translateY(0); }
+        .reveal-delay-1 { transition-delay: 0.1s; }
+        .reveal-delay-2 { transition-delay: 0.2s; }
+        .reveal-delay-3 { transition-delay: 0.3s; }
+        .reveal-delay-4 { transition-delay: 0.4s; }
+
+        /* === NAV === */
+        nav {
+            position: fixed;
+            top: 0; left: 0; right: 0;
+            z-index: 100;
+            padding: 18px 40px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: transparent;
+            transition: all 0.4s;
+        }
+        nav.scrolled {
+            background: rgba(255, 255, 255, 0.18);
+            backdrop-filter: blur(32px) saturate(180%);
+            -webkit-backdrop-filter: blur(32px) saturate(180%);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.3);
+            padding: 14px 40px;
+        }
+        .nav-logo {
+            font-family: var(--font-display);
+            font-weight: 700;
+            font-size: 3rem;
+            text-decoration: none;
+            letter-spacing: -0.03em;
+            color: #fff;
+            text-shadow: 0 0 12px rgba(255,255,255,0.8), 0 0 40px rgba(255,255,255,0.3);
+        }
+        .nav-logo span {
+            color: #fff;
+        }
+        .nav-links {
+            display: flex;
+            align-items: center;
+            gap: 32px;
+            list-style: none;
+        }
+        .nav-links a {
+            font-size: 1rem;
+            font-weight: 500;
+            color: var(--text-muted);
+            text-decoration: none;
+            transition: color 0.3s;
+        }
+        .nav-links a:hover { color: var(--navy); }
+        .nav-cta {
+            background: rgba(42, 42, 69, 0.85) !important;
+            color: var(--white) !important;
+            padding: 10px 24px !important;
+            border-radius: 100px !important;
+            font-weight: 600 !important;
+            transition: all 0.3s !important;
+            font-size: 1rem !important;
+            backdrop-filter: blur(8px);
+        }
+        .nav-cta:hover {
+            transform: translateY(-1px);
+            background: rgba(42, 42, 69, 0.95) !important;
+        }
+        @media (max-width: 768px) {
+            nav { padding: 10px 18px; gap: 10px; }
+            .nav-hide { display: none; }
+        }
+
+        /* === CONTAINER === */
+        .container {
+            max-width: 1060px;
+            margin: 0 auto;
+            padding: 0 32px;
+            position: relative;
+            z-index: 1;
+        }
+        @media (max-width: 768px) { .container { padding: 0 20px; } }
+
+        /* === HERO === */
+        .hero {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            padding: 140px 32px 60px;
+            position: relative;
+            z-index: 1;
+        }
+        .hero-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 7px 18px;
+            font-size: 0.78rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            letter-spacing: 0.03em;
+            margin-bottom: 28px;
+        }
+        .hero-badge::before {
+            content: '';
+            width: 7px; height: 7px;
+            background: var(--amber);
+            border-radius: 50%;
+            animation: pulse-dot 2.5s ease-in-out infinite;
+        }
+        @keyframes pulse-dot {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.4; transform: scale(1.5); }
+        }
+        .hero h1 {
+            font-family: var(--font-display);
+            font-size: clamp(3.2rem, 8vw, 6rem);
+            font-weight: 800;
+            line-height: 1.05;
+            color: var(--navy);
+            letter-spacing: -0.04em;
+            margin-bottom: 28px;
+            max-width: 800px;
+        }
+        .hero h1 em {
+            font-style: normal;
+            color: #fff;
+            -webkit-text-fill-color: #fff;
+            text-shadow: 0 0 16px rgba(255,255,255,0.9), 0 0 50px rgba(255,255,255,0.35);
+        }
+        .hero-sub {
+            font-size: clamp(1.05rem, 2vw, 1.25rem);
+            color: var(--text-muted);
+            max-width: 520px;
+            margin-bottom: 48px;
+            line-height: 1.75;
+            font-weight: 300;
+        }
+
+        /* === HERO CTA === */
+        .hero-cta {
+            display: inline-block;
+            padding: 16px 36px;
+            background: rgba(42, 42, 69, 0.85);
+            color: var(--white);
+            border-radius: 100px;
+            font-family: var(--font-body);
+            font-size: 1rem;
+            font-weight: 600;
+            text-decoration: none;
+            transition: all 0.3s;
+            backdrop-filter: blur(8px);
+            z-index: 2;
+        }
+        .hero-cta:hover {
+            transform: translateY(-2px);
+            background: rgba(42, 42, 69, 0.95);
+            box-shadow: 0 8px 24px rgba(42, 42, 69, 0.2);
+        }
+        @media (max-width: 520px) {
+            .hero { padding: 120px 20px 50px; }
+        }
+
+        /* === MOCKUP === */
+        .hero-mockup {
+            margin-top: 48px;
+            width: 100%;
+            max-width: 820px;
+            z-index: 2;
+        }
+        .mockup-window {
+            overflow: hidden;
+            border-radius: var(--radius-lg);
+        }
+        .mockup-bar {
+            display: flex;
+            align-items: center;
+            gap: 7px;
+            padding: 14px 18px;
+            background: rgba(255, 255, 255, 0.15);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        .mockup-dot { width: 10px; height: 10px; border-radius: 50%; }
+        .mockup-dot:nth-child(1) { background: rgba(255, 95, 87, 0.7); }
+        .mockup-dot:nth-child(2) { background: rgba(255, 189, 46, 0.7); }
+        .mockup-dot:nth-child(3) { background: rgba(40, 200, 64, 0.7); }
+        .mockup-content {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            min-height: 300px;
+        }
+        @media (max-width: 768px) { .mockup-content { grid-template-columns: 1fr; } }
+        .mockup-input {
+            padding: 26px;
+            border-right: 1px solid rgba(255, 255, 255, 0.15);
+        }
+        .mockup-input-label, .mockup-output-label {
+            font-size: 0.68rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.12em;
+            color: var(--text-light);
+            margin-bottom: 12px;
+        }
+        .mockup-text {
+            font-size: 0.88rem;
+            color: var(--text);
+            line-height: 1.8;
+        }
+        .mockup-text .highlight {
+            background: rgba(232, 168, 56, 0.18);
+            padding: 1px 5px;
+            border-radius: 4px;
+            font-weight: 500;
+        }
+        .mockup-cursor {
+            display: inline-block;
+            width: 2px; height: 1.1em;
+            background: var(--amber);
+            vertical-align: text-bottom;
+            animation: blink 1s step-end infinite;
+        }
+        @keyframes blink { 50% { opacity: 0; } }
+        .mockup-output { padding: 26px; }
+        .mockup-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 5px;
+            margin-bottom: 16px;
+        }
+        .mockup-tag {
+            padding: 4px 11px;
+            border-radius: 100px;
+            font-size: 0.72rem;
+            font-weight: 500;
+            background: rgba(255, 255, 255, 0.22);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+        }
+        .tag-mood { color: #3a8a6a; }
+        .tag-energy { color: #b37200; }
+        .tag-med { color: #6a5aaa; }
+        .tag-activity { color: #b04060; }
+        .mockup-insight {
+            border-radius: 14px;
+            padding: 13px 16px;
+            margin-top: 10px;
+            background: rgba(255, 255, 255, 0.18);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.25);
+        }
+        .mockup-insight-icon { font-size: 0.95rem; margin-bottom: 5px; }
+        .mockup-insight-text {
+            font-size: 0.78rem;
+            color: var(--text-muted);
+            line-height: 1.5;
+        }
+        .mockup-insight-text strong { color: var(--teal-light); }
+
+        /* === SECTIONS === */
+        section { padding: 110px 0; position: relative; z-index: 1; }
+        .section-label {
+            font-family: var(--font-display);
+            font-size: 0.75rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
+            color: var(--amber);
+            margin-bottom: 12px;
+        }
+        .section-title {
+            font-family: var(--font-display);
+            font-size: clamp(2rem, 4vw, 2.8rem);
+            font-weight: 800;
+            color: var(--navy);
+            letter-spacing: -0.02em;
+            line-height: 1.15;
+            margin-bottom: 16px;
+            max-width: 560px;
+        }
+        .section-desc {
+            font-size: 1rem;
+            color: var(--text-muted);
+            max-width: 460px;
+            line-height: 1.7;
+            font-weight: 300;
+        }
+
+        /* === PROBLEM === */
+        .problem-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 16px;
+            margin-top: 48px;
+        }
+        @media (max-width: 768px) { .problem-grid { grid-template-columns: 1fr; } }
+        .problem-card {
+            padding: 28px 24px;
+            transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        .problem-card:hover { transform: translateY(-3px); }
+        .problem-icon { font-size: 1.6rem; margin-bottom: 14px; }
+        .problem-card h3 {
+            font-family: var(--font-display);
+            font-size: 1.05rem;
+            font-weight: 700;
+            color: var(--navy);
+            margin-bottom: 8px;
+        }
+        .problem-card p {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            line-height: 1.6;
+        }
+
+        /* === HOW IT WORKS === */
+        .how-it-works {
+            background: rgba(42, 42, 69, 0.6);
+            backdrop-filter: blur(48px) saturate(140%);
+            -webkit-backdrop-filter: blur(48px) saturate(140%);
+            border-top: 1px solid rgba(255, 255, 255, 0.08);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            color: var(--white);
+        }
+        .how-it-works .section-title { color: rgba(255,255,255,0.92); }
+        .how-it-works .section-desc { color: rgba(255,255,255,0.45); }
+        .steps {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 24px;
+            margin-top: 52px;
+        }
+        @media (max-width: 768px) { .steps { grid-template-columns: 1fr; } }
+        .step-number {
+            font-family: var(--font-display);
+            font-size: 3rem;
+            font-weight: 800;
+            color: rgba(232, 168, 56, 0.15);
+            line-height: 1;
+            margin-bottom: 14px;
+        }
+        .step h3 {
+            font-family: var(--font-display);
+            font-size: 1.1rem;
+            font-weight: 700;
+            margin-bottom: 10px;
+            color: rgba(255,255,255,0.9);
+        }
+        .step p {
+            font-size: 0.85rem;
+            color: rgba(255,255,255,0.42);
+            line-height: 1.7;
+        }
+        .step-example {
+            margin-top: 16px;
+            padding: 14px;
+            background: rgba(255,255,255,0.06);
+            border-radius: 14px;
+            border: 1px solid rgba(255,255,255,0.08);
+            font-size: 0.78rem;
+            color: rgba(255,255,255,0.55);
+            font-style: italic;
+            line-height: 1.6;
+        }
+
+        /* === FEATURES === */
+        .features-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            margin-top: 48px;
+        }
+        @media (max-width: 768px) { .features-grid { grid-template-columns: 1fr; } }
+        .feature-card {
+            padding: 32px 28px;
+            transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        .feature-card:hover { transform: translateY(-3px); }
+        .feature-icon {
+            width: 40px; height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(255, 255, 255, 0.15);
+            border: 1px solid rgba(255,255,255,0.3);
+            border-radius: 12px;
+            font-size: 1.2rem;
+            margin-bottom: 18px;
+        }
+        .feature-card h3 {
+            font-family: var(--font-display);
+            font-size: 1.05rem;
+            font-weight: 700;
+            color: var(--navy);
+            margin-bottom: 8px;
+        }
+        .feature-card p {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            line-height: 1.6;
+        }
+
+        /* === FOR WHOM === */
+        .persona-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr 1fr;
+            gap: 14px;
+            margin-top: 48px;
+        }
+        @media (max-width: 900px) { .persona-grid { grid-template-columns: 1fr 1fr; } }
+        @media (max-width: 520px) { .persona-grid { grid-template-columns: 1fr; } }
+        .persona-card {
+            text-align: center;
+            padding: 32px 20px;
+            transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        .persona-card:hover { transform: translateY(-3px); }
+        .persona-emoji { font-size: 2rem; margin-bottom: 14px; }
+        .persona-card h3 {
+            font-family: var(--font-display);
+            font-size: 0.95rem;
+            font-weight: 700;
+            color: var(--navy);
+            margin-bottom: 6px;
+        }
+        .persona-card p {
+            font-size: 0.78rem;
+            color: var(--text-muted);
+            line-height: 1.6;
+        }
+
+        /* === BOTTOM CTA === */
+        .bottom-cta {
+            text-align: center;
+            padding: 90px 32px;
+            background: rgba(42, 42, 69, 0.65);
+            backdrop-filter: blur(48px) saturate(140%);
+            -webkit-backdrop-filter: blur(48px) saturate(140%);
+            border-top: 1px solid rgba(255,255,255,0.06);
+            z-index: 1;
+            position: relative;
+        }
+        .bottom-cta .section-title {
+            color: rgba(255,255,255,0.92);
+            max-width: 440px;
+            margin: 0 auto 12px;
+        }
+        .bottom-cta .section-desc {
+            color: rgba(255,255,255,0.4);
+            max-width: 400px;
+            margin: 0 auto 36px;
+        }
+        .bottom-cta-btn {
+            display: inline-block;
+            padding: 16px 36px;
+            background: rgba(232, 168, 56, 0.85);
+            color: var(--navy);
+            border-radius: 100px;
+            font-family: var(--font-body);
+            font-size: 1rem;
+            font-weight: 600;
+            text-decoration: none;
+            transition: all 0.3s;
+        }
+        .bottom-cta-btn:hover {
+            transform: translateY(-2px);
+            background: rgba(232, 168, 56, 0.95);
+            box-shadow: 0 8px 24px rgba(232, 168, 56, 0.2);
+        }
+
+        /* === FOOTER === */
+        footer {
+            background: rgba(42, 42, 69, 0.8);
+            padding: 28px;
+            text-align: center;
+            z-index: 1;
+            position: relative;
+        }
+        footer p { font-size: 0.78rem; color: rgba(255,255,255,0.2); }
+        footer a { color: rgba(255,255,255,0.28); text-decoration: none; }
+        footer a:hover { color: var(--amber); }
+    </style>
+</head>
+<body>
+
+    <div class="bg-mesh"></div>
+
+    <nav>
+        <a href="#" class="nav-logo">Clarity<span>.</span></a>
+        <ul class="nav-links">
+            <li><a href="#how-it-works" class="nav-hide">How it works</a></li>
+            <li><a href="#features" class="nav-hide">Features</a></li>
+            <li><a href="/app/" class="nav-cta">Try Clarity</a></li>
+        </ul>
+    </nav>
+
+    <section class="hero">
+        <div class="reveal">
+            <div class="hero-badge glass">AI-powered health journal</div>
+        </div>
+        <h1 class="reveal reveal-delay-1">Your mind, <em>decoded.</em></h1>
+        <p class="hero-sub reveal reveal-delay-2">
+            Write freely about your day. AI works silently for you — extracting patterns, generating reminders, and building reports you can share with your specialist.
+        </p>
+        <a href="/app/" class="hero-cta reveal reveal-delay-3">Start journaling →</a>
+
+        <div class="hero-mockup reveal reveal-delay-4">
+            <div class="mockup-window glass">
+                <div class="mockup-bar">
+                    <div class="mockup-dot"></div>
+                    <div class="mockup-dot"></div>
+                    <div class="mockup-dot"></div>
+                </div>
+                <div class="mockup-content">
+                    <div class="mockup-input">
+                        <div class="mockup-input-label">Your entry</div>
+                        <div class="mockup-text">
+                            Slept ok but woke up <span class="highlight">anxious</span>. Took <span class="highlight">Elvanse</span> at 9, had a long <span class="highlight">walk</span> which helped a lot. Focused all morning. Need to <span class="highlight">call the dentist</span> and <span class="highlight">refill prescription</span>. Energy dropped after lunch.<span class="mockup-cursor"></span>
+                        </div>
+                    </div>
+                    <div class="mockup-output">
+                        <div class="mockup-output-label">Clarity works for you</div>
+                        <div class="mockup-tags">
+                            <span class="mockup-tag tag-mood">😊 Mood: 4→7</span>
+                            <span class="mockup-tag tag-energy">⚡ Energy: low→high→mid</span>
+                            <span class="mockup-tag tag-med">💊 Elvanse 9:00</span>
+                            <span class="mockup-tag tag-activity">🚶 Walk — morning</span>
+                        </div>
+                        <div class="mockup-insight" style="margin-top: 8px;">
+                            <div class="mockup-insight-icon">🔔</div>
+                            <div class="mockup-insight-text">
+                                <strong>Reminder:</strong> Call the dentist · Refill prescription
+                            </div>
+                        </div>
+                        <div class="mockup-insight">
+                            <div class="mockup-insight-icon">💡</div>
+                            <div class="mockup-insight-text">
+                                <strong>Pattern:</strong> Morning walks correlate with better focus windows. Energy dips post-lunch 4 of the last 5 days.
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="problem">
+        <div class="container">
+            <div class="section-label reveal">The problem</div>
+            <h2 class="section-title reveal reveal-delay-1">Tracking your mind shouldn't feel like homework.</h2>
+            <p class="section-desc reveal reveal-delay-2">Every mood tracker asks you to fill out forms and rate sliders. Life isn't that structured.</p>
+            <div class="problem-grid">
+                <div class="problem-card glass reveal reveal-delay-1">
+                    <div class="problem-icon">📋</div>
+                    <h3>Forms kill honesty</h3>
+                    <p>Rating your mood 1-10 turns self-reflection into a chore. You start guessing instead of feeling.</p>
+                </div>
+                <div class="problem-card glass reveal reveal-delay-2">
+                    <div class="problem-icon">🧩</div>
+                    <h3>Patterns stay hidden</h3>
+                    <p>You journal, you track, you take notes — but the insights stay buried. Qualitative data never becomes actionable.</p>
+                </div>
+                <div class="problem-card glass reveal reveal-delay-3">
+                    <div class="problem-icon">🗣️</div>
+                    <h3>Your doctor guesses</h3>
+                    <p>"How have you been?" You try to remember two weeks in fifteen minutes. They work with fragments, not data.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="how-it-works" id="how-it-works">
+        <div class="container">
+            <div class="section-label reveal">How it works</div>
+            <h2 class="section-title reveal reveal-delay-1">Three steps. Zero friction.</h2>
+            <p class="section-desc reveal reveal-delay-2">No forms. No categories. Just be yourself.</p>
+            <div class="steps">
+                <div class="step reveal reveal-delay-1">
+                    <div class="step-number">01</div>
+                    <h3>Write anything</h3>
+                    <p>Type, speak, ramble. Any language, any format, any length.</p>
+                    <div class="step-example">"Woke up groggy, skipped breakfast, took meds late. Afternoon was surprisingly good after the walk."</div>
+                </div>
+                <div class="step reveal reveal-delay-2">
+                    <div class="step-number">02</div>
+                    <h3>AI works for you</h3>
+                    <p>Clarity extracts patterns, generates reminders from things you mentioned, and identifies what to monitor — all automatically.</p>
+                    <div class="step-example">Mood: improving · Elvanse: consistent · Reminder: call dentist · Pattern: walks → better focus</div>
+                </div>
+                <div class="step reveal reveal-delay-3">
+                    <div class="step-number">03</div>
+                    <h3>Share with your specialist</h3>
+                    <p>A structured clinical report — weeks of real data, not a vague recap. Export it and bring it to your next appointment.</p>
+                    <div class="step-example">"Mood trend: improving. Confirmed: morning exercise correlates with +2 energy. Hypothesis: caffeine after 2pm disrupts sleep 70% of the time."</div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="features" id="features">
+        <div class="container">
+            <div class="section-label reveal">Features</div>
+            <h2 class="section-title reveal reveal-delay-1">Everything you need. Nothing you don't.</h2>
+            <div class="features-grid">
+                <div class="feature-card glass reveal reveal-delay-1">
+                    <div class="feature-icon">✍️</div>
+                    <h3>Natural language input</h3>
+                    <p>Write like you're texting a friend — messy thoughts, quick updates, any language. AI understands the context.</p>
+                </div>
+                <div class="feature-card glass reveal reveal-delay-2">
+                    <div class="feature-icon">🔔</div>
+                    <h3>Smart reminders</h3>
+                    <p>Mention "I need to call the dentist" in an entry and Clarity remembers for you. No lists, no effort. Built for busy minds.</p>
+                </div>
+                <div class="feature-card glass reveal reveal-delay-3">
+                    <div class="feature-icon">🩺</div>
+                    <h3>Clinical reports</h3>
+                    <p>A structured report with trends, medication analysis, and actionable patterns — ready to share with your doctor.</p>
+                </div>
+                <div class="feature-card glass reveal reveal-delay-4">
+                    <div class="feature-icon">📊</div>
+                    <h3>Pattern detection</h3>
+                    <p>Correlations between mood, energy, medications, and activities — surfaced automatically over time.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="for-whom" id="for-whom">
+        <div class="container">
+            <div class="section-label reveal">Built for</div>
+            <h2 class="section-title reveal reveal-delay-1">Anyone who wants to understand themselves better.</h2>
+            <div class="persona-grid">
+                <div class="persona-card glass reveal reveal-delay-1">
+                    <div class="persona-emoji">🧠</div>
+                    <h3>Busy minds</h3>
+                    <p>Automatic reminders, zero cognitive load. You just write — Clarity organizes the rest.</p>
+                </div>
+                <div class="persona-card glass reveal reveal-delay-2">
+                    <div class="persona-emoji">💊</div>
+                    <h3>People on medication</h3>
+                    <p>Monitor effects, compare regimes, track what actually changes. Real data, not guesses.</p>
+                </div>
+                <div class="persona-card glass reveal reveal-delay-3">
+                    <div class="persona-emoji">🧑‍⚕️</div>
+                    <h3>Health professionals</h3>
+                    <p>Structured reports between sessions. Weeks of real data instead of a fifteen-minute recap.</p>
+                </div>
+                <div class="persona-card glass reveal reveal-delay-4">
+                    <div class="persona-emoji">🌱</div>
+                    <h3>The curious</h3>
+                    <p>What drives your mood and energy? You don't need a diagnosis to want to understand yourself.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="bottom-cta" id="get-started">
+        <div class="container">
+            <h2 class="section-title reveal">Start understanding yourself.</h2>
+            <p class="section-desc reveal reveal-delay-1">Your words become data. Data becomes insight. Insight becomes a conversation with your specialist.</p>
+            <a href="/app/" class="bottom-cta-btn reveal reveal-delay-2">Try Clarity free →</a>
+        </div>
+    </section>
+
+    <footer>
+        <p>© 2026 Clarity. Built with purpose. <a href="/app/">Open app</a> · <a href="https://github.com/alessandrodamore-tech/clarity" target="_blank">GitHub</a></p>
+    </footer>
+
+    <script>
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) entry.target.classList.add('visible');
+            });
+        }, { threshold: 0.1, rootMargin: '0px 0px -40px 0px' });
+        document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+        window.addEventListener('scroll', () => {
+            document.querySelector('nav').classList.toggle('scrolled', window.scrollY > 50);
+        });
+    </script>
+</body>
+</html>
