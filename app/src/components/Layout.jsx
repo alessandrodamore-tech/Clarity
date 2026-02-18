@@ -134,7 +134,7 @@ export default function Layout() {
       {/* Top bar */}
       <header style={{
         position: 'fixed', top: 0, left: 0, right: 0, zIndex: 100,
-        height: 56,
+        height: 'calc(56px + env(safe-area-inset-top, 0px))',
         paddingTop: 'env(safe-area-inset-top, 0px)',
         paddingLeft: 12, paddingRight: 12,
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -177,7 +177,7 @@ export default function Layout() {
       {/* Content */}
       <main style={{
         flex: 1, position: 'relative', zIndex: 1,
-        padding: '68px 16px 24px',
+        padding: 'calc(68px + env(safe-area-inset-top, 0px)) 16px 24px',
         maxWidth: 960, width: '100%', margin: '0 auto',
       }}>
         <div key={location.pathname} className="page-transition">
