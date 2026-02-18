@@ -94,6 +94,7 @@ export default function Reminders() {
   const { user, entries } = useApp()
   const [data, setData] = useState(loadCachedReminders)
   const [loading, setLoading] = useState(false)
+  const [updating, setUpdating] = useState(false) // incremental — keeps existing content visible
   const [scanning, setScanning] = useState(false)
   const [error, setError] = useState(null)
   const [mounted, setMounted] = useState(false)
@@ -175,8 +176,9 @@ export default function Reminders() {
   useEffect(() => { dataRef.current = data }, [data])
 
   const generate = useCallback(async (incremental = false) => {
-    if (!entries?.length || loading) return
-    setLoading(true)
+    if (!entries?.length || loading || updating) return
+    if (incremental) setUpdating(true)
+    else setLoading(true)
     setError(null)
     try {
       if (incremental) {
@@ -221,8 +223,9 @@ export default function Reminders() {
       setError(e.message || 'Failed to generate reminders')
     } finally {
       setLoading(false)
+      setUpdating(false)
     }
-  }, [entries, daySummaries, recentHash, loading])
+  }, [entries, daySummaries, recentHash, loading, updating])
 
   // Auto-generate: first visit = full, then only incremental for new entries
   // MUST wait for Supabase to load first to avoid regenerating cached data
@@ -315,19 +318,23 @@ export default function Reminders() {
           </p>
         </div>
         {!loading && data && (
-          <button
-            onClick={() => generate(false)}
-            style={{
-              background: 'none', border: 'none', cursor: 'pointer',
-              color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 4,
-              fontSize: '.75rem', fontFamily: 'var(--font-display)', fontWeight: 600,
-              opacity: 0.7, transition: 'opacity .2s',
-            }}
-            onMouseEnter={e => e.currentTarget.style.opacity = 1}
-            onMouseLeave={e => e.currentTarget.style.opacity = 0.7}
-          >
-            <RefreshCw size={12} /> Refresh
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {updating && <RefreshCw size={13} style={{ color: 'var(--amber)', animation: 'spin 1s linear infinite' }} />}
+            <button
+              onClick={() => generate(false)}
+              disabled={updating}
+              style={{
+                background: 'none', border: 'none', cursor: 'pointer',
+                color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 4,
+                fontSize: '.75rem', fontFamily: 'var(--font-display)', fontWeight: 600,
+                opacity: updating ? 0.4 : 0.7, transition: 'opacity .2s',
+              }}
+              onMouseEnter={e => { if (!updating) e.currentTarget.style.opacity = 1 }}
+              onMouseLeave={e => { if (!updating) e.currentTarget.style.opacity = 0.7 }}
+            >
+              <RefreshCw size={12} /> Refresh
+            </button>
+          </div>
         )}
       </div>
 

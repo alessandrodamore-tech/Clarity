@@ -109,6 +109,8 @@ export async function pushToNotion(token, databaseId, entries, onProgress) {
 
 // ─── AUTO-SYNC SINGLE ENTRY (fire-and-forget) ───────────
 export async function autoSyncEntry(entry) {
+  // Small delay to ensure credentials are hydrated from getUser()
+  await new Promise(r => setTimeout(r, 1500))
   try {
     const { token, databaseId, titleProperty } = getNotionCredentials()
     if (!token || !databaseId) return // not connected
@@ -128,9 +130,11 @@ export async function autoSyncEntry(entry) {
     if (r?.ok && r.notion_page_id) {
       syncMap[entry.id] = r.notion_page_id
       saveSyncMap(syncMap)
+    } else if (r && !r.ok) {
+      console.warn('Notion auto-sync failed:', r.error)
     }
-  } catch {
-    // Silent fail — auto-sync should never block the user
+  } catch (e) {
+    console.warn('Notion auto-sync error:', e.message)
   }
 }
 
