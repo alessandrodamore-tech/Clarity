@@ -164,9 +164,18 @@ async function callGemini(prompt, { maxOutputTokens = 8192, temperature = 0.1, j
       }
 
       const data = await res.json()
-      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '{}'
+      const parts = data?.candidates?.[0]?.content?.parts || []
+      // Thinking model (gemini-3-pro-preview) emits a thought part first (thought: true)
+      // followed by the actual response part — always pick the non-thought text
+      const responsePart = parts.find(p => p.text && !p.thought) ?? parts.find(p => p.text) ?? {}
+      const text = responsePart.text || '{}'
       const finishReason = data?.candidates?.[0]?.finishReason
-      const clean = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
+      // Strip markdown code fences, then extract the first JSON object/array
+      const stripped = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
+      const jsonStart = Math.min(
+        ...[stripped.indexOf('{'), stripped.indexOf('[')].filter(i => i !== -1)
+      )
+      const clean = jsonStart > 0 ? stripped.slice(jsonStart) : stripped
       if (!jsonMode) return clean
       if (finishReason === 'MAX_TOKENS') {
         console.warn('Gemini response truncated (MAX_TOKENS) — attempting repair')
@@ -499,19 +508,13 @@ Analyze ALL entries carefully and extract:
    - Gentle nudges for gaps (missed medication, reduced activity)
    - Cross-factor correlations ("caffeine after 3pm correlates with poor sleep entries")
 
-4. **alerts**: Health-related items requiring attention:
-   - Medication gaps with specific counts ("haven't mentioned X in Y days")
-   - Mood decline patterns with dates
-   - Sleep issues mentioned repeatedly
-   - Substance use patterns
-   - Any pattern that might warrant professional attention
-
 Return JSON:
 {
   "reminders": [
     {
       "text": "what needs to be done",
       "source_date": "YYYY-MM-DD",
+      "due_date": "YYYY-MM-DD or null — infer from context (e.g. 'entro venerdì', 'domani', 'questo weekend', specific dates mentioned). null if no deadline implied.",
       "source_excerpt": "brief quote from the entry that triggered this",
       "priority": "high|medium|low",
       "action_hint": "optional: concrete next step, search query, or useful info to help complete this task"
@@ -531,13 +534,6 @@ Return JSON:
       "type": "positive|warning|info",
       "based_on": "evidence from the entries (cite dates)"
     }
-  ],
-  "alerts": [
-    {
-      "title": "alert title",
-      "detail": "detailed explanation with specific dates and evidence",
-      "severity": "high|medium|low"
-    }
   ]
 }
 
@@ -545,7 +541,6 @@ Rules:
 - Only include REAL reminders found in the text — don't invent tasks
 - For answers, provide GENUINELY useful information with real knowledge — no generic advice
 - Suggestions must cite specific dates and data from entries
-- Alerts should only flag genuinely concerning patterns
 - Each section can be empty [] if nothing relevant is found — don't force items
 - Be thorough — scan EVERY entry for potential reminders and questions
 - action_hint and search_query should be practical and immediately useful`

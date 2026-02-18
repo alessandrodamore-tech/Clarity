@@ -2,7 +2,7 @@ import { useState } from 'react'
 import {
   Sparkles, Loader2, TrendingUp, TrendingDown, Minus, Activity,
   BarChart3, FlaskConical, Lightbulb, Clock, Beaker,
-  ChevronDown, ChevronRight,
+  ChevronDown, ChevronRight, Info,
 } from 'lucide-react'
 
 const trendConfig = {
@@ -186,6 +186,19 @@ export default function AnalysisReport({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+      {/* ── Disclaimer ── */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 8,
+        padding: '10px 14px', borderRadius: 12,
+        background: 'rgba(150,150,170,0.06)',
+        border: '1px solid rgba(150,150,170,0.12)',
+      }}>
+        <Info size={14} style={{ color: 'var(--text-light)', flexShrink: 0 }} />
+        <p style={{ margin: 0, fontSize: '0.72rem', color: 'var(--text-light)', lineHeight: 1.5 }}>
+          This report is AI-generated and for informational purposes only. It is not medical advice. Always consult a qualified healthcare professional.
+        </p>
+      </div>
+
       {/* ── Executive Summary + Mood Trend ── */}
       <div className="glass" style={{ borderRadius: 'var(--radius-lg)', padding: '1.5rem', ...sectionAnim(0) }}>
         {/* Mood badge + refresh */}

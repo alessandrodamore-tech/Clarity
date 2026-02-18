@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react'
 import { supabase } from './supabase'
-import { autoSyncEntry, getNotionCredentials, pullFromNotion, loadNotionCredentialsFromUser } from './notion'
+import { autoSyncEntry, autoUpdateNotionEntry, getNotionCredentials, pullFromNotion, loadNotionCredentialsFromUser } from './notion'
 
 const AppContext = createContext(null)
 
@@ -112,6 +112,10 @@ export function AppProvider({ children }) {
     
     if (!error) {
       setEntries(prev => prev.map(e => e.id === id ? { ...e, ...updates } : e))
+      // Auto-sync update to Notion (fire-and-forget)
+      if (updates.text !== undefined) {
+        autoUpdateNotionEntry({ id, text: updates.text })
+      }
     }
     return { error }
   }

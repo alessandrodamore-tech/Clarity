@@ -1,11 +1,11 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { useApp } from '../lib/store'
 import { supabase } from '../lib/supabase'
-import { loadCachedSummaries, generateReminders, findMissedReminders } from '../lib/gemini'
+import { loadCachedSummaries, generateReminders } from '../lib/gemini'
 import {
   Bell, Lightbulb, MessageCircle, AlertTriangle, CheckCircle2,
   RefreshCw, Search, ExternalLink, Square, CheckSquare,
-  ChevronDown, ChevronRight, Archive,
+  ChevronDown, ChevronRight, Archive, RotateCcw,
 } from 'lucide-react'
 
 const CACHE_KEY = 'clarity_reminders'
@@ -13,6 +13,7 @@ const SEEN_KEY = 'clarity_reminders_seen'
 const HASH_KEY = 'clarity_reminders_hash'
 const DONE_KEY = 'clarity_reminders_done'
 const PROCESSED_IDS_KEY = 'clarity_reminders_processed_ids'
+const NOTIF_KEY = 'clarity_notif_sent'
 
 function hashEntries(entries) {
   return entries.map(e => e.id).sort().join('|')
@@ -28,7 +29,6 @@ function saveCachedReminders(data, hash, userId) {
     localStorage.setItem(HASH_KEY, hash)
     localStorage.setItem(SEEN_KEY, Date.now().toString())
   } catch {}
-  // Persist to Supabase (fire-and-forget)
   if (userId) {
     supabase.from('user_reminders').upsert({
       user_id: userId,
@@ -76,31 +76,68 @@ function saveProcessedIds(ids, userId) {
   }
 }
 
-const severityColors = {
-  high: { color: '#dc3c3c', bg: 'rgba(220,60,60,0.10)', border: 'rgba(220,60,60,0.25)' },
-  medium: { color: '#9a7030', bg: 'rgba(232,168,56,0.10)', border: 'rgba(232,168,56,0.25)' },
-  low: { color: 'var(--text-light)', bg: 'rgba(150,150,170,0.08)', border: 'rgba(150,150,170,0.2)' },
+// ─── NOTIFICATIONS ────────────────────────────────────────
+async function requestNotificationPermission() {
+  if (!('Notification' in window)) return false
+  if (Notification.permission === 'granted') return true
+  if (Notification.permission === 'denied') return false
+  const perm = await Notification.requestPermission()
+  return perm === 'granted'
 }
 
+function showDueNotifications(reminders, doneSet) {
+  if (!('Notification' in window) || Notification.permission !== 'granted') return
+  const today = new Date().toISOString().slice(0, 10)
+  // Track which notifications were already sent today
+  let sent
+  try { sent = new Set(JSON.parse(localStorage.getItem(NOTIF_KEY) || '[]')) } catch { sent = new Set() }
+  const newSent = [...sent]
+
+  reminders
+    .filter(r => r.due_date && r.due_date <= today && !doneSet.has(r._key) && !sent.has(r._key))
+    .slice(0, 5)
+    .forEach(r => {
+      const isOverdue = r.due_date < today
+      new Notification('Clarity' + (isOverdue ? ' — Scaduto' : ' — In scadenza oggi'), {
+        body: r.text,
+        tag: r._key,
+        icon: '/clarity-icon.png',
+      })
+      newSent.push(r._key)
+    })
+
+  try { localStorage.setItem(NOTIF_KEY, JSON.stringify(newSent)) } catch {}
+}
+
+// ─── HELPERS ──────────────────────────────────────────────
 const suggestionTypeConfig = {
   positive: { color: '#3a8a6a', bg: 'rgba(58,138,106,0.10)', icon: CheckCircle2 },
   warning: { color: '#9a7030', bg: 'rgba(232,168,56,0.10)', icon: AlertTriangle },
   info: { color: 'var(--text-light)', bg: 'rgba(150,150,170,0.08)', icon: Lightbulb },
 }
 
-const priorityOrder = { high: 0, medium: 1, low: 2 }
+function formatDueDate(due) {
+  if (!due) return null
+  const today = new Date().toISOString().slice(0, 10)
+  const isOverdue = due < today
+  const isToday = due === today
+  const d = new Date(due + 'T00:00:00')
+  const label = isToday ? 'oggi' : d.toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })
+  return { label, isOverdue, isToday }
+}
 
+// ─── COMPONENT ────────────────────────────────────────────
 export default function Reminders() {
   const { user, entries } = useApp()
   const [data, setData] = useState(loadCachedReminders)
   const [loading, setLoading] = useState(false)
-  const [updating, setUpdating] = useState(false) // incremental — keeps existing content visible
-  const [scanning, setScanning] = useState(false)
+  const [updating, setUpdating] = useState(false)
   const [error, setError] = useState(null)
   const [mounted, setMounted] = useState(false)
   const [daySummaries, setDaySummaries] = useState({})
   const [doneSet, setDoneSet] = useState(loadDoneSet)
   const [supabaseLoaded, setSupabaseLoaded] = useState(false)
+  const [processedIds, setProcessedIds] = useState(() => loadProcessedIds())
 
   useEffect(() => {
     window.scrollTo(0, 0)
@@ -118,7 +155,7 @@ export default function Reminders() {
     loadCachedSummaries(user.id).then(cache => setDaySummaries(cache))
   }, [user])
 
-  // Load reminders from Supabase (wins over localStorage) — must complete before auto-generate
+  // Load reminders from Supabase
   useEffect(() => {
     if (!user?.id) { setSupabaseLoaded(true); return }
     supabase
@@ -138,6 +175,7 @@ export default function Reminders() {
             try { localStorage.setItem(DONE_KEY, JSON.stringify(row.done_items)) } catch {}
           }
           if (row.processed_ids) {
+            setProcessedIds(new Set(row.processed_ids))
             try { localStorage.setItem(PROCESSED_IDS_KEY, JSON.stringify(row.processed_ids)) } catch {}
           }
           if (row.entries_hash) {
@@ -148,15 +186,14 @@ export default function Reminders() {
       .finally(() => setSupabaseLoaded(true))
   }, [user])
 
-  // Count new (unprocessed) entries for the "update available" banner
+  // Count new (unprocessed) entries — drives auto-update
   const newEntryCount = useMemo(() => {
     if (!entries?.length) return 0
-    const processedIds = loadProcessedIds()
     const cutoff = new Date()
     cutoff.setDate(cutoff.getDate() - 14)
     const cutoffStr = cutoff.toISOString().slice(0, 10)
     return entries.filter(e => e.entry_date >= cutoffStr && !processedIds.has(e.id)).length
-  }, [entries])
+  }, [entries, processedIds])
 
   // Compute entries hash (last 14 days)
   const recentHash = useMemo(() => {
@@ -179,22 +216,18 @@ export default function Reminders() {
     setError(null)
     try {
       if (incremental) {
-        // Find entries not yet processed
-        const processedIds = loadProcessedIds()
+        const currentProcessedIds = loadProcessedIds()
         const cutoff = new Date()
         cutoff.setDate(cutoff.getDate() - 14)
         const cutoffStr = cutoff.toISOString().slice(0, 10)
         const newEntries = entries.filter(e =>
-          e.entry_date >= cutoffStr && !processedIds.has(e.id)
+          e.entry_date >= cutoffStr && !currentProcessedIds.has(e.id)
         )
         if (newEntries.length === 0) {
-          // No new entries (e.g. deletion) — just update hash
           localStorage.setItem(HASH_KEY, recentHash)
-          setLoading(false)
           return
         }
         const result = await generateReminders(newEntries, daySummaries)
-        // Merge new results with existing data
         const existing = dataRef.current || { reminders: [], answers: [], suggestions: [], alerts: [] }
         const merged = {
           reminders: [...(existing.reminders || []), ...(result.reminders || [])],
@@ -204,18 +237,16 @@ export default function Reminders() {
         }
         setData(merged)
         saveCachedReminders(merged, recentHash, user?.id)
-        // doneSet preserved — no clearing
       } else {
-        // Full regeneration
         const result = await generateReminders(entries, daySummaries)
         setData(result)
         saveCachedReminders(result, recentHash, user?.id)
         setDoneSet(new Set())
         saveDoneSet(new Set(), user?.id)
       }
-      // Update processed IDs to all current recent entry IDs
       const allIds = new Set(entries.map(e => e.id))
       saveProcessedIds(allIds, user?.id)
+      setProcessedIds(allIds)
     } catch (e) {
       setError(e.message || 'Failed to generate reminders')
     } finally {
@@ -224,8 +255,7 @@ export default function Reminders() {
     }
   }, [entries, daySummaries, recentHash, loading, updating])
 
-  // Only auto-generate on FIRST EVER visit (no cached data at all).
-  // All subsequent updates are user-triggered via Refresh or the "new entries" banner.
+  // First-ever visit: auto-generate if no cache
   const autoGenDone = useRef(false)
   useEffect(() => {
     if (autoGenDone.current || !supabaseLoaded || !entries?.length || loading || updating) return
@@ -234,31 +264,24 @@ export default function Reminders() {
     if (!hasCache) generate(false)
   }, [supabaseLoaded, entries?.length])
 
-  const scanMissed = useCallback(async () => {
-    if (!entries?.length || scanning || loading) return
-    setScanning(true)
-    setError(null)
-    try {
-      const existing = dataRef.current || { reminders: [], answers: [], suggestions: [], alerts: [] }
-      const result = await findMissedReminders(entries, existing)
-      const hasNew = (result.reminders?.length || 0) + (result.answers?.length || 0) +
-        (result.suggestions?.length || 0) + (result.alerts?.length || 0) > 0
-      if (hasNew) {
-        const merged = {
-          reminders: [...(existing.reminders || []), ...(result.reminders || [])],
-          answers: [...(existing.answers || []), ...(result.answers || [])],
-          suggestions: [...(existing.suggestions || []), ...(result.suggestions || [])],
-          alerts: [...(existing.alerts || []), ...(result.alerts || [])],
-        }
-        setData(merged)
-        saveCachedReminders(merged, recentHash, user?.id)
-      }
-    } catch (e) {
-      setError(e.message || 'Failed to scan for missed reminders')
-    } finally {
-      setScanning(false)
-    }
-  }, [entries, scanning, loading, recentHash, user])
+  // Auto-incremental update when new entries arrive
+  const lastAutoCount = useRef(0)
+  useEffect(() => {
+    if (!supabaseLoaded || !data || loading || updating) return
+    if (newEntryCount <= 0 || newEntryCount === lastAutoCount.current) return
+    lastAutoCount.current = newEntryCount
+    generate(true)
+  }, [newEntryCount, supabaseLoaded, data])
+
+  // Notifications: request permission and notify due reminders
+  useEffect(() => {
+    if (!data?.reminders?.length) return
+    requestNotificationPermission().then(granted => {
+      if (!granted) return
+      const keyed = data.reminders.map((r, i) => ({ ...r, _key: `rem-${i}` }))
+      showDueNotifications(keyed, doneSet)
+    })
+  }, [data])
 
   const toggleDone = (key) => {
     setDoneSet(prev => {
@@ -272,32 +295,62 @@ export default function Reminders() {
 
   const [showArchived, setShowArchived] = useState(false)
 
-  // Split reminders into active and archived, sorted by source_date (oldest first)
+  // Split reminders into active/archived
   const { activeReminders, archivedReminders } = useMemo(() => {
     if (!data?.reminders?.length) return { activeReminders: [], archivedReminders: [] }
     const sorted = data.reminders
       .map((rem, i) => ({ ...rem, _key: `rem-${i}` }))
-      .sort((a, b) => (a.source_date || '').localeCompare(b.source_date || ''))
+      .sort((a, b) => {
+        // Sort by due_date first, then source_date
+        const da = a.due_date || a.source_date || ''
+        const db = b.due_date || b.source_date || ''
+        return da.localeCompare(db)
+      })
     return {
       activeReminders: sorted.filter(r => !doneSet.has(r._key)),
       archivedReminders: sorted.filter(r => doneSet.has(r._key)),
     }
   }, [data?.reminders, doneSet])
 
-  const sectionAnim = (delay) => ({
-    animation: mounted ? `slideUp 0.6s cubic-bezier(0.16, 1, 0.3, 1) ${delay}ms both` : undefined,
-  })
+  // Active answers and suggestions (not done)
+  const activeAnswers = useMemo(() =>
+    (data?.answers || []).map((a, i) => ({ ...a, _key: `ans-${i}` })).filter(a => !doneSet.has(a._key)),
+    [data?.answers, doneSet]
+  )
+  const activesuggestions = useMemo(() =>
+    (data?.suggestions || []).map((s, i) => ({ ...s, _key: `sug-${i}` })).filter(s => !doneSet.has(s._key)),
+    [data?.suggestions, doneSet]
+  )
 
-  const hasReminders = data?.reminders?.length > 0
-  const hasAnswers = data?.answers?.length > 0
-  const hasSuggestions = data?.suggestions?.length > 0
-  const hasAlerts = data?.alerts?.length > 0
-  const isEmpty = !hasReminders && !hasAnswers && !hasSuggestions && !hasAlerts
+  // ── Tab navigation ──────────────────────────────────────
+  const [activeTab, setActiveTab] = useState(0)
+  const [slideDir, setSlideDir] = useState(0) // 1 = from right, -1 = from left
+  const touchStartX = useRef(null)
+
+  const goToTab = (idx) => {
+    if (idx === activeTab) return
+    setSlideDir(idx > activeTab ? 1 : -1)
+    setActiveTab(idx)
+  }
+  const handleTouchStart = (e) => { touchStartX.current = e.touches[0].clientX }
+  const handleTouchEnd = (e) => {
+    if (touchStartX.current === null) return
+    const delta = touchStartX.current - e.changedTouches[0].clientX
+    if (delta > 50 && activeTab < 2) goToTab(activeTab + 1)
+    else if (delta < -50 && activeTab > 0) goToTab(activeTab - 1)
+    touchStartX.current = null
+  }
+
+  const tabs = [
+    { label: 'Reminders', count: activeReminders.length },
+    { label: 'Answers',   count: activeAnswers.length },
+    { label: 'Suggestions', count: activesuggestions.length },
+  ]
 
   return (
     <div style={{ padding: '1.5rem', maxWidth: 900, margin: '0 auto', fontFamily: 'var(--font-body)' }}>
       {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
         <div>
           <h1 style={{ fontFamily: 'var(--font-display)', fontSize: '2rem', color: 'var(--text)', margin: 0 }}>
             Reminders
@@ -306,44 +359,33 @@ export default function Reminders() {
             Smart insights from your recent entries
           </p>
         </div>
-        {!loading && data && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            {updating && <RefreshCw size={13} style={{ color: 'var(--amber)', animation: 'spin 1s linear infinite' }} />}
-            <button
-              onClick={() => generate(false)}
-              disabled={updating}
-              style={{
-                background: 'none', border: 'none', cursor: 'pointer',
-                color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 4,
-                fontSize: '.75rem', fontFamily: 'var(--font-display)', fontWeight: 600,
-                opacity: updating ? 0.4 : 0.7, transition: 'opacity .2s',
-              }}
-              onMouseEnter={e => { if (!updating) e.currentTarget.style.opacity = 1 }}
-              onMouseLeave={e => { if (!updating) e.currentTarget.style.opacity = 0.7 }}
-            >
-              <RefreshCw size={12} /> Refresh
-            </button>
-          </div>
-        )}
-      </div>
-
-      {/* New entries banner */}
-      {!loading && !updating && data && newEntryCount > 0 && (
+        {/* Re-analyze button */}
         <button
-          onClick={() => generate(true)}
+          onClick={() => generate(false)}
+          disabled={loading || updating || !entries?.length}
+          title="Re-analyze all entries"
           style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-            width: '100%', padding: '10px 16px', marginBottom: 16,
-            borderRadius: 14, border: '1px solid rgba(232,168,56,0.2)',
-            background: 'rgba(232,168,56,0.08)', cursor: 'pointer',
-            color: 'var(--amber)', fontSize: '0.82rem',
-            fontFamily: 'var(--font-display)', fontWeight: 600,
+            display: 'flex', alignItems: 'center', gap: 6,
+            padding: '8px 14px', borderRadius: 100, flexShrink: 0,
+            background: 'rgba(255,255,255,0.15)',
+            border: '1px solid rgba(255,255,255,0.25)',
+            color: (loading || updating) ? 'var(--amber)' : 'var(--text-muted)',
+            fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: '0.75rem',
+            cursor: (loading || updating || !entries?.length) ? 'default' : 'pointer',
+            opacity: !entries?.length ? 0.4 : 1,
+            transition: 'all 0.2s',
+            backdropFilter: 'blur(8px)',
+            WebkitBackdropFilter: 'blur(8px)',
           }}
         >
-          <Bell size={14} />
-          {newEntryCount} new {newEntryCount === 1 ? 'entry' : 'entries'} — tap to update
+          {(loading || updating) ? (
+            <RefreshCw size={13} style={{ animation: 'spin 1s linear infinite' }} />
+          ) : (
+            <RotateCcw size={13} />
+          )}
+          {(loading || updating) ? 'Updating...' : 'Re-analyze'}
         </button>
-      )}
+      </div>
 
       {/* Loading */}
       {loading && (
@@ -373,303 +415,214 @@ export default function Reminders() {
         </div>
       )}
 
-      {/* Empty results */}
-      {!loading && data && isEmpty && (
-        <div className="glass" style={{ borderRadius: 'var(--radius-lg)', padding: '2rem', textAlign: 'center' }}>
-          <CheckCircle2 size={36} style={{ color: '#3a8a6a', marginBottom: 14, opacity: 0.5 }} />
-          <p style={{ color: 'var(--text-muted)', fontSize: '.85rem', margin: 0 }}>
-            Nothing actionable found in your recent entries. Keep writing and check back later!
-          </p>
-        </div>
-      )}
-
-      {/* ── REMINDERS (active) — first section ── */}
-      {!loading && activeReminders.length > 0 && (
-        <div className="glass" style={{
-          borderRadius: 'var(--radius-lg)', padding: '1.5rem', marginBottom: '1.25rem',
-          ...sectionAnim(80),
-        }}>
-          <SectionHeader icon={Bell} title="Reminders" count={activeReminders.length} />
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {activeReminders.map((rem) => (
-              <div key={rem._key} style={{
-                padding: '12px 14px', borderRadius: 12,
-                background: 'rgba(255,255,255,0.06)',
-                borderLeft: '3px solid var(--text-light)',
-                display: 'flex', gap: 10, alignItems: 'flex-start',
-              }}>
-                <button
-                  onClick={() => toggleDone(rem._key)}
-                  style={{
-                    background: 'none', border: 'none', cursor: 'pointer',
-                    padding: 0, flexShrink: 0, marginTop: 1,
-                    color: 'var(--text-light)', transition: 'color 0.2s',
-                  }}
-                >
-                  <Square size={18} />
-                </button>
-                <div style={{ flex: 1 }}>
-                  <p style={{ margin: 0, fontSize: '0.88rem', color: 'var(--text)', lineHeight: 1.6 }}>
-                    {rem.text}
-                  </p>
-                  {rem.action_hint && (
-                    <p style={{
-                      margin: '6px 0 0', fontSize: '0.76rem', color: 'var(--amber)',
-                      lineHeight: 1.5, display: 'flex', alignItems: 'center', gap: 4,
-                    }}>
-                      <ExternalLink size={10} style={{ flexShrink: 0 }} />
-                      {rem.action_hint}
-                    </p>
-                  )}
-                  {rem.source_excerpt && (
-                    <p style={{
-                      margin: '4px 0 0', fontSize: '0.72rem', color: 'var(--text-light)',
-                      fontStyle: 'italic', lineHeight: 1.5,
-                    }}>
-                      "{rem.source_excerpt}" — {rem.source_date}
-                    </p>
-                  )}
-                </div>
-              </div>
+      {/* Tab bar + content — shown when data loaded and entries exist */}
+      {!loading && entries?.length > 0 && (
+        <>
+          {/* Tab bar */}
+          <div style={{
+            display: 'flex', gap: 3, marginBottom: 16,
+            background: 'rgba(255,255,255,0.1)',
+            border: '1px solid rgba(255,255,255,0.2)',
+            borderRadius: 100, padding: 3,
+          }}>
+            {tabs.map((tab, i) => (
+              <button
+                key={i}
+                onClick={() => goToTab(i)}
+                style={{
+                  flex: 1, padding: '8px 8px', borderRadius: 100,
+                  background: activeTab === i ? 'rgba(255,255,255,0.28)' : 'transparent',
+                  border: activeTab === i ? '1px solid rgba(255,255,255,0.5)' : '1px solid transparent',
+                  color: activeTab === i ? 'var(--navy)' : 'var(--text-muted)',
+                  fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: '0.73rem',
+                  cursor: 'pointer', transition: 'all 0.2s',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
+                  backdropFilter: activeTab === i ? 'blur(8px)' : 'none',
+                  WebkitBackdropFilter: activeTab === i ? 'blur(8px)' : 'none',
+                }}
+              >
+                {tab.label}
+                {tab.count > 0 && (
+                  <span style={{
+                    padding: '1px 6px', borderRadius: 100, fontSize: '0.62rem', fontWeight: 700,
+                    background: activeTab === i ? 'rgba(42,42,69,0.12)' : 'rgba(255,255,255,0.15)',
+                    color: activeTab === i ? 'var(--navy)' : 'var(--text-light)',
+                    minWidth: 16, textAlign: 'center',
+                  }}>{tab.count}</span>
+                )}
+              </button>
             ))}
           </div>
-          {/* Find missed — inside card */}
-          {!scanning ? (
-            <button
-              onClick={scanMissed}
+
+          {/* Swipeable content */}
+          <div onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
+            <div
+              key={activeTab}
               style={{
-                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-                width: '100%', marginTop: 12, padding: '9px 0',
-                background: 'none', border: '1px dashed rgba(150,150,170,0.25)',
-                borderRadius: 10, cursor: 'pointer',
-                color: 'var(--text-light)', fontSize: '0.75rem',
-                fontFamily: 'var(--font-display)', fontWeight: 600,
-                transition: 'color 0.2s, border-color 0.2s',
+                animation: slideDir !== 0
+                  ? `${slideDir > 0 ? 'tabFromRight' : 'tabFromLeft'} 0.28s cubic-bezier(0.16,1,0.3,1) both`
+                  : undefined,
               }}
             >
-              <Search size={12} />
-              Find missed reminders
-            </button>
-          ) : (
-            <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <div className="shimmer-pill" style={{ width: '100%', height: 12 }} />
-              <div className="shimmer-pill" style={{ width: '75%', height: 12 }} />
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ── ARCHIVED REMINDERS (collapsible) ── */}
-      {!loading && archivedReminders.length > 0 && (
-        <div style={{ marginBottom: '1.25rem', ...sectionAnim(100) }}>
-          <button
-            onClick={() => setShowArchived(!showArchived)}
-            style={{
-              background: 'none', border: 'none', cursor: 'pointer',
-              display: 'flex', alignItems: 'center', gap: 6,
-              color: 'var(--text-light)', fontSize: '0.78rem',
-              fontFamily: 'var(--font-display)', fontWeight: 600,
-              padding: '8px 0', width: '100%',
-              transition: 'color 0.2s',
-            }}
-          >
-            {showArchived ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-            <Archive size={13} />
-            Archived ({archivedReminders.length})
-          </button>
-          {showArchived && (
-            <div style={{
-              display: 'flex', flexDirection: 'column', gap: 6, marginTop: 6,
-              animation: 'slideUp 0.3s ease both',
-            }}>
-              {archivedReminders.map((rem) => (
-                <div key={rem._key} style={{
-                  padding: '10px 14px', borderRadius: 12,
-                  background: 'rgba(58,138,106,0.04)',
-                  borderLeft: '3px solid rgba(58,138,106,0.3)',
-                  display: 'flex', gap: 10, alignItems: 'center',
-                  opacity: 0.5,
-                }}>
-                  <button
-                    onClick={() => toggleDone(rem._key)}
-                    style={{
-                      background: 'none', border: 'none', cursor: 'pointer',
-                      padding: 0, flexShrink: 0, color: '#3a8a6a',
-                    }}
-                  >
-                    <CheckSquare size={16} />
-                  </button>
-                  <p style={{
-                    margin: 0, fontSize: '0.82rem', color: 'var(--text-muted)',
-                    lineHeight: 1.5, textDecoration: 'line-through', flex: 1,
-                  }}>
-                    {rem.text}
-                  </p>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ── ALERTS ── */}
-      {!loading && hasAlerts && (
-        <div style={{ marginBottom: '1.25rem', ...sectionAnim(120) }}>
-          {data.alerts
-            .sort((a, b) => (priorityOrder[a.severity] || 2) - (priorityOrder[b.severity] || 2))
-            .map((alert, i) => {
-              const s = severityColors[alert.severity] || severityColors.medium
-              return (
-                <div key={i} style={{
-                  padding: '14px 16px', borderRadius: 14, marginBottom: 10,
-                  background: s.bg, border: `1px solid ${s.border}`,
-                  display: 'flex', gap: 12, alignItems: 'flex-start',
-                }}>
-                  <AlertTriangle size={18} style={{ color: s.color, flexShrink: 0, marginTop: 1 }} />
-                  <div style={{ flex: 1 }}>
-                    <h4 style={{
-                      fontFamily: 'var(--font-display)', fontWeight: 600,
-                      fontSize: '0.88rem', color: s.color, margin: '0 0 4px',
-                    }}>{alert.title}</h4>
-                    <p style={{ color: 'var(--text-muted)', fontSize: '0.82rem', lineHeight: 1.7, margin: 0 }}>
-                      {alert.detail}
-                    </p>
-                  </div>
-                </div>
-              )
-            })}
-        </div>
-      )}
-
-      {/* ── ANSWERS (with search links) ── */}
-      {!loading && hasAnswers && (
-        <div className="glass" style={{
-          borderRadius: 'var(--radius-lg)', padding: '1.5rem', marginBottom: '1.25rem',
-          ...sectionAnim(160),
-        }}>
-          <SectionHeader icon={MessageCircle} title="Answers" count={data.answers.length} />
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {data.answers.map((ans, i) => (
-              <div key={i} style={{
-                padding: '14px 16px', borderRadius: 12,
-                background: 'rgba(255,255,255,0.06)',
-                borderLeft: '3px solid var(--amber)',
-              }}>
-                <p style={{
-                  margin: '0 0 8px', fontSize: '0.85rem', color: 'var(--text)',
-                  fontWeight: 600, lineHeight: 1.5,
-                }}>
-                  {ans.question}
-                </p>
-                <p style={{
-                  margin: 0, fontSize: '0.84rem', color: 'var(--text-muted)',
-                  lineHeight: 1.8,
-                }}>
-                  {ans.answer}
-                </p>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }}>
-                  {ans.source_date && (
-                    <p style={{ margin: 0, fontSize: '0.68rem', color: 'var(--text-light)' }}>
-                      From entry on {ans.source_date}
-                    </p>
+              {/* ── REMINDERS panel ── */}
+              {activeTab === 0 && (
+                <>
+                  {activeReminders.length > 0 ? (
+                    <div className="glass" style={{ borderRadius: 'var(--radius-lg)', padding: '1.5rem', marginBottom: '1rem' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                        {activeReminders.map((rem) => {
+                          const due = formatDueDate(rem.due_date)
+                          return (
+                            <div key={rem._key} style={{
+                              padding: '12px 14px', borderRadius: 12,
+                              background: due?.isOverdue ? 'rgba(220,60,60,0.04)' : 'rgba(255,255,255,0.06)',
+                              borderLeft: `3px solid ${due?.isOverdue ? '#dc3c3c' : due?.isToday ? 'var(--amber)' : 'var(--text-light)'}`,
+                              display: 'flex', gap: 10, alignItems: 'flex-start',
+                            }}>
+                              <button onClick={() => toggleDone(rem._key)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, flexShrink: 0, marginTop: 1, color: 'var(--text-light)' }}>
+                                <Square size={18} />
+                              </button>
+                              <div style={{ flex: 1 }}>
+                                <p style={{ margin: 0, fontSize: '0.88rem', color: 'var(--text)', lineHeight: 1.6 }}>{rem.text}</p>
+                                {due && (
+                                  <p style={{ margin: '4px 0 0', fontSize: '0.72rem', fontWeight: 600, color: due.isOverdue ? '#dc3c3c' : due.isToday ? 'var(--amber)' : 'var(--text-light)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                                    {due.isOverdue ? '⚠ scaduto · ' : '📅 '}{due.label}
+                                  </p>
+                                )}
+                                {rem.action_hint && (
+                                  <p style={{ margin: '6px 0 0', fontSize: '0.76rem', color: 'var(--amber)', lineHeight: 1.5, display: 'flex', alignItems: 'center', gap: 4 }}>
+                                    <ExternalLink size={10} style={{ flexShrink: 0 }} />{rem.action_hint}
+                                  </p>
+                                )}
+                                {rem.source_excerpt && (
+                                  <p style={{ margin: '4px 0 0', fontSize: '0.72rem', color: 'var(--text-light)', fontStyle: 'italic', lineHeight: 1.5 }}>
+                                    "{rem.source_excerpt}" — {rem.source_date}
+                                  </p>
+                                )}
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="glass" style={{ borderRadius: 'var(--radius-lg)', padding: '2rem', textAlign: 'center', marginBottom: '1rem' }}>
+                      <CheckCircle2 size={32} style={{ color: '#3a8a6a', opacity: 0.4, marginBottom: 10 }} />
+                      <p style={{ color: 'var(--text-muted)', fontSize: '.85rem', margin: 0 }}>No reminders found in recent entries.</p>
+                    </div>
                   )}
-                  {ans.search_query && (
-                    <a
-                      href={`https://www.google.com/search?q=${encodeURIComponent(ans.search_query)}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      style={{
-                        display: 'inline-flex', alignItems: 'center', gap: 4,
-                        fontSize: '0.72rem', color: 'var(--amber)', textDecoration: 'none',
-                        fontWeight: 600, opacity: 0.9,
-                        transition: 'opacity 0.2s',
-                      }}
-                      onMouseEnter={e => e.currentTarget.style.opacity = 1}
-                      onMouseLeave={e => e.currentTarget.style.opacity = 0.9}
-                    >
-                      <Search size={10} /> Learn more
-                    </a>
+
+                  {/* Done / archived */}
+                  {archivedReminders.length > 0 && (
+                    <div>
+                      <button
+                        onClick={() => setShowArchived(!showArchived)}
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text-light)', fontSize: '0.78rem', fontFamily: 'var(--font-display)', fontWeight: 600, padding: '8px 0', width: '100%' }}
+                      >
+                        {showArchived ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                        <Archive size={13} />
+                        Done ({archivedReminders.length})
+                      </button>
+                      {showArchived && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 6 }}>
+                          {archivedReminders.map((rem) => (
+                            <div key={rem._key} style={{ padding: '10px 14px', borderRadius: 12, background: 'rgba(58,138,106,0.04)', borderLeft: '3px solid rgba(58,138,106,0.3)', display: 'flex', gap: 10, alignItems: 'center', opacity: 0.5 }}>
+                              <button onClick={() => toggleDone(rem._key)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, flexShrink: 0, color: '#3a8a6a' }}>
+                                <CheckSquare size={16} />
+                              </button>
+                              <p style={{ margin: 0, fontSize: '0.82rem', color: 'var(--text-muted)', lineHeight: 1.5, textDecoration: 'line-through', flex: 1 }}>{rem.text}</p>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   )}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+                </>
+              )}
 
-      {/* ── SUGGESTIONS ── */}
-      {!loading && hasSuggestions && (
-        <div className="glass" style={{
-          borderRadius: 'var(--radius-lg)', padding: '1.5rem', marginBottom: '1.25rem',
-          ...sectionAnim(240),
-        }}>
-          <SectionHeader icon={Lightbulb} title="Suggestions" count={data.suggestions.length} />
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {data.suggestions.map((sug, i) => {
-              const config = suggestionTypeConfig[sug.type] || suggestionTypeConfig.info
-              const Icon = config.icon
-              return (
-                <div key={i} style={{
-                  padding: '12px 14px', borderRadius: 12,
-                  background: config.bg,
-                  display: 'flex', gap: 10, alignItems: 'flex-start',
-                }}>
-                  <Icon size={16} style={{ color: config.color, flexShrink: 0, marginTop: 2 }} />
-                  <div style={{ flex: 1 }}>
-                    <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text)', lineHeight: 1.7 }}>
-                      {sug.text}
-                    </p>
-                    {sug.based_on && (
-                      <p style={{ margin: '4px 0 0', fontSize: '0.72rem', color: 'var(--text-light)', lineHeight: 1.5 }}>
-                        {sug.based_on}
-                      </p>
-                    )}
+              {/* ── ANSWERS panel ── */}
+              {activeTab === 1 && (
+                activeAnswers.length > 0 ? (
+                  <div className="glass" style={{ borderRadius: 'var(--radius-lg)', padding: '1.5rem' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                      {activeAnswers.map((ans) => (
+                        <div key={ans._key} style={{ padding: '14px 16px', borderRadius: 12, background: 'rgba(255,255,255,0.06)', borderLeft: '3px solid var(--amber)', display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+                          <button onClick={() => toggleDone(ans._key)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, flexShrink: 0, marginTop: 2, color: 'var(--text-light)' }}>
+                            <Square size={18} />
+                          </button>
+                          <div style={{ flex: 1 }}>
+                            <p style={{ margin: '0 0 8px', fontSize: '0.85rem', color: 'var(--text)', fontWeight: 600, lineHeight: 1.5 }}>{ans.question}</p>
+                            <p style={{ margin: 0, fontSize: '0.84rem', color: 'var(--text-muted)', lineHeight: 1.8 }}>{ans.answer}</p>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }}>
+                              {ans.source_date && <p style={{ margin: 0, fontSize: '0.68rem', color: 'var(--text-light)' }}>From entry on {ans.source_date}</p>}
+                              {ans.search_query && (
+                                <a href={`https://www.google.com/search?q=${encodeURIComponent(ans.search_query)}`} target="_blank" rel="noopener noreferrer" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: '0.72rem', color: 'var(--amber)', textDecoration: 'none', fontWeight: 600 }}>
+                                  <Search size={10} /> Learn more
+                                </a>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                </div>
-              )
-            })}
-          </div>
-        </div>
-      )}
+                ) : (
+                  <div className="glass" style={{ borderRadius: 'var(--radius-lg)', padding: '2rem', textAlign: 'center' }}>
+                    <MessageCircle size={32} style={{ color: 'var(--text-light)', opacity: 0.3, marginBottom: 10 }} />
+                    <p style={{ color: 'var(--text-muted)', fontSize: '.85rem', margin: 0 }}>No questions found in recent entries.</p>
+                  </div>
+                )
+              )}
 
+              {/* ── SUGGESTIONS panel ── */}
+              {activeTab === 2 && (
+                activesuggestions.length > 0 ? (
+                  <div className="glass" style={{ borderRadius: 'var(--radius-lg)', padding: '1.5rem' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                      {activesuggestions.map((sug) => {
+                        const config = suggestionTypeConfig[sug.type] || suggestionTypeConfig.info
+                        const Icon = config.icon
+                        return (
+                          <div key={sug._key} style={{ padding: '12px 14px', borderRadius: 12, background: config.bg, display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+                            <Icon size={16} style={{ color: config.color, flexShrink: 0, marginTop: 2 }} />
+                            <div style={{ flex: 1 }}>
+                              <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text)', lineHeight: 1.7 }}>{sug.text}</p>
+                              {sug.based_on && <p style={{ margin: '4px 0 0', fontSize: '0.72rem', color: 'var(--text-light)', lineHeight: 1.5 }}>{sug.based_on}</p>}
+                            </div>
+                            <button onClick={() => toggleDone(sug._key)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, flexShrink: 0, color: 'var(--text-light)' }}>
+                              <Square size={16} />
+                            </button>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="glass" style={{ borderRadius: 'var(--radius-lg)', padding: '2rem', textAlign: 'center' }}>
+                    <Lightbulb size={32} style={{ color: 'var(--text-light)', opacity: 0.3, marginBottom: 10 }} />
+                    <p style={{ color: 'var(--text-muted)', fontSize: '.85rem', margin: 0 }}>No suggestions yet based on recent entries.</p>
+                  </div>
+                )
+              )}
+            </div>
+          </div>
+        </>
+      )}
 
       <style>{`
-        @keyframes slideUp {
-          from { opacity: 0; transform: translateY(20px); }
-          to { opacity: 1; transform: translateY(0); }
+        @keyframes tabFromRight {
+          from { opacity: 0; transform: translateX(28px); }
+          to   { opacity: 1; transform: translateX(0); }
+        }
+        @keyframes tabFromLeft {
+          from { opacity: 0; transform: translateX(-28px); }
+          to   { opacity: 1; transform: translateX(0); }
         }
         @keyframes shimmer {
-          0% { background-position: -200% 0; }
+          0%   { background-position: -200% 0; }
           100% { background-position: 200% 0; }
         }
       `}</style>
-    </div>
-  )
-}
-
-function SectionHeader({ icon: Icon, title, count, extra }) {
-  return (
-    <div style={{
-      display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14,
-      paddingBottom: 10, borderBottom: '1px solid rgba(255,255,255,0.08)',
-    }}>
-      <Icon size={16} style={{ color: 'var(--text-muted)' }} />
-      <h3 style={{
-        fontFamily: 'var(--font-display)', fontSize: '1.05rem',
-        color: 'var(--text)', margin: 0, fontWeight: 700, flex: 1,
-      }}>{title}</h3>
-      {extra && (
-        <span style={{
-          fontSize: '0.68rem', color: '#3a8a6a', fontWeight: 600,
-          fontFamily: 'var(--font-display)',
-        }}>{extra}</span>
-      )}
-      {count > 0 && (
-        <span style={{
-          padding: '2px 8px', borderRadius: 100, fontSize: '0.65rem',
-          fontWeight: 700, background: 'rgba(255,255,255,0.1)', color: 'var(--text-light)',
-        }}>{count}</span>
-      )}
     </div>
   )
 }

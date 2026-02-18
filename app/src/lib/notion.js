@@ -138,6 +138,48 @@ export async function autoSyncEntry(entry) {
   }
 }
 
+// ─── AUTO-UPDATE SINGLE ENTRY ON NOTION (fire-and-forget) ─
+export async function autoUpdateNotionEntry(entry) {
+  await new Promise(r => setTimeout(r, 1500))
+  try {
+    const { token, databaseId, titleProperty } = getNotionCredentials()
+    if (!token || !databaseId) return
+
+    const syncMap = loadSyncMap()
+    const notionPageId = syncMap[entry.id]
+
+    if (notionPageId) {
+      // Update existing page
+      await callNotion({
+        action: 'update',
+        token,
+        page_id: notionPageId,
+        properties: {
+          [titleProperty || 'Annotazione']: {
+            title: [{ text: { content: entry.text } }],
+          },
+        },
+      })
+    } else {
+      // Fallback: push as new page
+      const result = await callNotion({
+        action: 'push',
+        token,
+        database_id: databaseId,
+        title_property: titleProperty,
+        entries: [{ id: entry.id, text: entry.text }],
+      })
+      const r = result.results?.[0]
+      if (r?.ok && r.notion_page_id) {
+        syncMap[entry.id] = r.notion_page_id
+        saveSyncMap(syncMap)
+      }
+    }
+  } catch (e) {
+    console.warn('Notion auto-update error:', e.message)
+  }
+}
+
 // ─── CLEANUP NOTION DUPLICATES ───────────────────────────
 export async function cleanupNotionDuplicates(token, databaseId, onProgress) {
   // 1. Fetch all pages

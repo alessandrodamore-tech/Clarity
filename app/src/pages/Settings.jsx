@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { User, Upload, Info, LogOut, Trash2, Check, RefreshCw, Link2, Unlink, ArrowUpFromLine, ArrowDownToLine } from 'lucide-react'
 import { useApp } from '../lib/store'
 import { supabase } from '../lib/supabase'
-import { clearSummaryCache, loadCachedSummaries } from '../lib/gemini'
+import { loadCachedSummaries } from '../lib/gemini'
 import { getNotionCredentials, saveNotionCredentials, clearNotionCredentials, loadNotionCredentialsFromUser, testNotionConnection, pushToNotion, pullFromNotion, cleanupNotionDuplicates } from '../lib/notion'
 import { FeatureHint } from '../components/Onboarding'
 
@@ -16,7 +16,6 @@ export default function Settings() {
   const [displayName, setDisplayName] = useState('')
   const [timezone, setTimezone] = useState('')
   const [saved, setSaved] = useState(false)
-  const [clearing, setClearing] = useState(false)
   const [analyzedCount, setAnalyzedCount] = useState(0)
   const [context, setContext] = useState('')
   const [contextSaved, setContextSaved] = useState(false)
@@ -231,18 +230,6 @@ export default function Settings() {
     } finally {
       setNotionCleaning(false)
     }
-  }
-
-  const handleClearCache = async () => {
-    if (!confirm('This will delete all cached analyses. You can re-analyze your days afterwards.')) return
-    setClearing(true)
-    await clearSummaryCache(user?.id)
-    localStorage.removeItem('clarity_global_insights')
-    localStorage.removeItem('clarity_global_report')
-    localStorage.removeItem('clarity_reminders')
-    localStorage.removeItem('clarity_reminders_hash')
-    localStorage.removeItem('clarity_reminders_done')
-    setClearing(false)
   }
 
   const handleLogout = async () => {
@@ -547,35 +534,10 @@ export default function Settings() {
         )}
       </div>
 
-      {/* Data */}
-      <div className="glass" style={{ borderRadius: 'var(--radius-lg)', padding: 24 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
-          <Trash2 size={18} style={{ color: 'var(--navy)' }} />
-          <h2 style={{ fontFamily: 'var(--font-display)', fontSize: '1.1rem', fontWeight: 700, color: 'var(--navy)', margin: 0 }}>Data</h2>
-        </div>
-        <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', lineHeight: 1.6, marginBottom: 16 }}>
-          Clear all AI analyses cache. Your journal entries won't be affected.
-        </p>
-        <button
-          onClick={handleClearCache}
-          disabled={clearing}
-          style={{
-            width: '100%', padding: '12px 24px', borderRadius: 'var(--radius)',
-            background: 'rgba(220,60,60,0.08)', color: '#dc3c3c',
-            border: '1px solid rgba(220,60,60,0.2)',
-            fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: '0.88rem',
-            cursor: clearing ? 'wait' : 'pointer', opacity: clearing ? 0.6 : 1,
-            transition: 'all 0.2s',
-          }}
-        >
-          {clearing ? 'Clearing...' : 'Clear Analysis Cache'}
-        </button>
-      </div>
-
       {/* About */}
       <div className="glass" style={{ borderRadius: 'var(--radius-lg)', padding: 24, textAlign: 'center' }}>
         <Info size={18} style={{ color: 'var(--text-light)', marginBottom: 8 }} />
-        <p style={{ color: 'var(--text-light)', fontSize: '0.85rem' }}>Clarity v0.3 — Your mind, decoded.</p>
+        <p style={{ color: 'var(--text-light)', fontSize: '0.85rem' }}>Clarity v0.3.2 — Your mind, decoded.</p>
       </div>
 
       {/* Your Journey */}

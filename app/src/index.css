@@ -106,7 +106,7 @@ body {
   border: 1px solid rgba(255, 255, 255, 0.45);
   border-radius: 100px;
   font-family: var(--font-body);
-  font-size: 0.92rem;
+  font-size: 16px;
   background: rgba(255, 255, 255, 0.2);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
@@ -126,7 +126,7 @@ body {
   border: 1px solid rgba(255, 255, 255, 0.3);
   border-radius: 16px;
   font-family: var(--font-body);
-  font-size: 0.92rem;
+  font-size: 16px;
   background: rgba(255, 255, 255, 0.15);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
@@ -613,7 +613,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  padding-bottom: calc(140px + env(safe-area-inset-bottom, 0px));
+  padding-bottom: calc(80px + env(safe-area-inset-bottom, 0px));
 }
 
 .feed-card {
@@ -657,7 +657,7 @@ body {
   width: 48px;
   height: 48px;
   flex-shrink: 0;
-  border-radius: 16px;
+  border-radius: 50%;
   color: var(--text-muted);
   text-decoration: none;
   transition: all 0.2s;
@@ -669,7 +669,7 @@ body {
 .feed-input-inner {
   display: flex;
   gap: 14px;
-  align-items: baseline;
+  align-items: center;
   padding: 10px 16px;
   background: rgba(255, 255, 255, 0.6);
   backdrop-filter: blur(32px) saturate(180%);
@@ -724,7 +724,7 @@ body {
   border: none;
   background: transparent;
   font-family: var(--font-body);
-  font-size: 0.88rem;
+  font-size: 16px;
   line-height: 1.6;
   color: var(--text);
   outline: none;

@@ -338,8 +338,8 @@ export default function Home() {
 
       {/* Input — fixed at bottom */}
       <div className="feed-input-bar">
-        {/* Smart hints — right above input */}
-        {!text.trim() && (hints.length > 0 || hintsLoading) && (
+        {/* Smart hints — right above input, always visible */}
+        {(hints.length > 0 || hintsLoading) && (
           <div className="hint-tray">
             {/* Refresh button — always first, always visible */}
             <button

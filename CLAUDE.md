@@ -63,28 +63,28 @@ GEMINI_API_KEY=<gemini-api-key>                     # server-side only, used by 
 ### Pages (src/pages/)
 | File | What it does |
 |------|-------------|
-| `Home.jsx` | Main feed — continuous entries oldest→newest, fixed input bar at bottom (chat-style) with Trends/Reminders nav buttons flanking it, AI hint chips above input (with refresh button), send icon button |
+| `Home.jsx` | Main feed — continuous entries oldest→newest, fixed input bar at bottom (chat-style) with Trends/Reminders nav buttons flanking it, AI hint chips above input (visible while typing, with refresh button), send icon button |
 | `DayDetail.jsx` | Full day view: AI insight card, entries (click to edit), AI-extracted actions with manual overrides |
-| `Trends.jsx` | Orchestrator: WellnessHero (heatmap + stats), AnalysisReport (AI clinical report), DetailedStats (time distribution + day-of-week) |
-| `Reminders.jsx` | Smart AI-generated reminders, alerts, answers, suggestions. Loads from cache instantly, never auto-regenerates. User-triggered updates via banner/button. Checkbox persistence + archive |
+| `Trends.jsx` | Orchestrator: WellnessHero (heatmap + stats), AnalysisReport (AI clinical report with disclaimer banner), DetailedStats (time distribution + day-of-week) |
+| `Reminders.jsx` | Tabbed UI (Reminders / Answers / Suggestions) with swipe navigation. Re-analyze button in header. Auto-incremental update on new entries. Due dates on reminders with browser notifications. Checkbox persistence + archive. No alerts section |
 | `Profile.jsx` | User info + AI context textarea. Context injected into ALL Gemini calls |
 | `Import.jsx` | Import wizard: text/CSV/Notion export/paste, preview, dedup, batch insert |
-| `Settings.jsx` | Profile + AI context + Notion sync + cache management + Import link + About + Sign Out (merged Profile+Settings) |
+| `Settings.jsx` | Profile + AI context + Notion sync + Import link + About + Sign Out (merged Profile+Settings) |
 | `Login.jsx` | Auth (login/signup) with Supabase |
 
 ### Core Libraries (src/lib/)
 | File | What it does |
 |------|-------------|
-| `gemini.js` | All AI logic: `callGemini()`, `extractDayData()`, `generateGlobalInsights()`, `generateReminders()`, `generatePlaceholderHints()`, `analyzeEntry()`, `findMissedReminders()`, `getUserContext()`, `loadCachedSummaries()`, `clearSummaryCache()` |
-| `notion.js` | Notion two-way sync: `testNotionConnection()`, `pushToNotion()`, `pullFromNotion()`, `autoSyncEntry()`, `cleanupNotionDuplicates()`, credential management, sync map |
-| `store.jsx` | React context: auth state, entries CRUD, `useApp()` hook, auto-sync to Notion on addEntry, auto-pull from Notion on app load |
+| `gemini.js` | All AI logic: `callGemini()`, `extractDayData()`, `generateGlobalInsights()`, `generateReminders()`, `generatePlaceholderHints()`, `analyzeEntry()`, `findMissedReminders()`, `getUserContext()`, `loadCachedSummaries()`, `clearSummaryCache()`. Thinking model support: filters `thought` parts from response |
+| `notion.js` | Notion two-way sync: `testNotionConnection()`, `pushToNotion()`, `pullFromNotion()`, `autoSyncEntry()`, `autoUpdateNotionEntry()`, `cleanupNotionDuplicates()`, credential management, sync map |
+| `store.jsx` | React context: auth state, entries CRUD, `useApp()` hook, auto-sync to Notion on addEntry + updateEntry, auto-pull from Notion on app load |
 | `supabase.js` | Supabase client init |
 | `constants.js` | Shared constants |
 
 ### Components (src/components/)
 | File | What it does |
 |------|-------------|
-| `Layout.jsx` | Top bar: Settings/gear (left), "Clarity." (center), Help/? (right, re-triggers onboarding). Page transitions (opacity fade). Safe area support for iPhone. Trends/Reminders in Home bottom bar |
+| `Layout.jsx` | Top bar: Settings/gear (left), "Clarity." (center), Help/? (right, triggers Liquid Glass onboarding bottom sheet). Page transitions (opacity fade). Scroll-to-top on route change. Safe area support for iPhone. Trends/Reminders in Home bottom bar |
 | `EntryDetailModal.jsx` | Read-first entry modal with AI actions (Analyze, Ask anything). Edit mode via pencil icon. Replaced EditEntryModal.jsx |
 | `EmptyState.jsx` | Reusable empty state component |
 | `ErrorBoundary.jsx` | React error boundary with refresh fallback |
@@ -98,7 +98,7 @@ GEMINI_API_KEY=<gemini-api-key>                     # server-side only, used by 
 - `.glass` class: frosted glass cards with `::before`/`::after` pseudo-elements for highlights
 - `.glass-textarea` class: frosted textarea with 16px border-radius (use for multiline input)
 - `.feed-send` class: subtle circular send button with opacity transitions
-- `.bottom-nav-btn` class: liquid glass navigation buttons flanking input bar
+- `.bottom-nav-btn` class: circular liquid glass navigation buttons flanking input bar
 - `.hint-chip` class: glass pill chips for AI hints (no box-shadow, no ::after)
 - `.hint-tray` class: horizontal scrollable chip container
 - Pastel gradient background
@@ -190,13 +190,13 @@ Cross-day clinical wellness report. Returns JSON with 8 fields:
 - Cache key: `clarity_global_report`
 
 ### `generateReminders(entries, daySummaries)`
-Scans last 14 days, extracts 4 types of items:
-- `reminders[]`: tasks/follow-ups mentioned in entries
+Scans last 14 days, extracts 3 types of items:
+- `reminders[]`: tasks/follow-ups mentioned in entries (with `due_date` inferred from context)
 - `answers[]`: answers to questions the user wondered about (with `search_query`)
-- `suggestions[]`: proactive wellness suggestions (with `type`: routine|experiment|optimization|social)
-- `alerts[]`: health/medication concerns (with `severity`: info|warning|urgent)
-- Each item has: `title`, `detail`, `source_date`, `source_quote`, `action_hint`
-- Auto-generates when entries hash changes
+- `suggestions[]`: proactive wellness suggestions (with `type`: positive|warning|info)
+- Each reminder has: `text`, `source_date`, `due_date`, `source_excerpt`, `priority`, `action_hint`
+- Auto-incremental update when new entries arrive, full re-analyze via header button
+- Browser notifications for due/overdue reminders (deduped via `clarity_notif_sent`)
 - Cache key: `clarity_reminders`, done state: `clarity_reminders_done`
 
 ### `generatePlaceholderHints(recentEntries)`
@@ -220,6 +220,8 @@ Re-scans all entries and finds reminders/suggestions/alerts/answers that were ov
 
 ### `callGemini(prompt, options)`
 - Retries with backoff on 429/5xx
+- **Thinking model support**: filters out `thought: true` parts from response, picks actual text content
+- **JSON extraction**: finds first `{` or `[` in response to skip any preamble text
 - JSON repair for truncated responses (`repairJSON` function)
 - **Handles array responses**: `if (Array.isArray(parsed)) parsed = parsed[0]` — critical fix
 - **`jsonMode: false`** skips JSON.parse, returns raw prose text
@@ -244,6 +246,7 @@ Re-scans all entries and finds reminders/suggestions/alerts/answers that were ov
 - `clarity_reminders_processed_ids` — processed entry IDs for incremental reminders
 - `clarity_notion_creds` — Notion credentials JSON (token, databaseId, databaseName, titleProperty). Also persisted in Supabase user_metadata for cross-device
 - `clarity_notion_sync_map` — JSON map of clarity_id → notion_page_id (dedup tracker)
+- `clarity_notif_sent` — dedup tracker for browser notifications (avoids repeat notifications same session)
 
 ## Notion Sync
 
@@ -277,7 +280,7 @@ Re-scans all entries and finds reminders/suggestions/alerts/answers that were ov
 - **Home = minimal AI** — entries, input, and AI hint chips above input (context-aware suggestions). All deep analysis lives in Trends/DayDetail/Reminders
 - **Feed order = chat-style** — oldest at top, newest at bottom, input fixed at bottom
 - **Day separators** in feed as glass pills (Today, Yesterday, or formatted date)
-- **On-demand analysis only** — user clicks ↻ per day or "Analyze all" in Settings. Reminders are user-triggered (never auto-regenerate on page open)
+- **On-demand analysis only** — user clicks ↻ per day. Reminders auto-update incrementally on new entries + manual "Re-analyze" button for full refresh
 - **Single API call per day** — summary + insight + actions together
 - **Actions not "Substances"** — right column tracks everything wellness-relevant
 - **Top bar simplified** — Profile (left), Clarity. (center), Settings (right)
@@ -285,7 +288,7 @@ Re-scans all entries and finds reminders/suggestions/alerts/answers that were ov
 - **Glass morphism** — frosted glass cards, not flat/material design
 - **User context everywhere** — Profile page context injected into all 3 AI functions
 - **Multilingual AI** — reports and reminders written in the same language as user entries
-- **Reminders never auto-regenerate** — loads from cache instantly. Shows "X new entries — tap to update" banner when new entries exist. Full refresh via button. Incremental updates merge with existing data
+- **Reminders** — tabbed UI (Reminders/Answers/Suggestions) with swipe navigation. Auto-incremental on new entries, "Re-analyze" button for full refresh. Due dates with browser notifications. All sections checkable
 - **Page transitions** — opacity fade (no transform — `transform` breaks `position: fixed` on Safari)
 - **iPhone safe areas** — `viewport-fit=cover` + `env(safe-area-inset-*)` for top bar, bottom input bar, and feed padding
 - **Notion credentials cross-device** — stored in Supabase `user_metadata`, hydrated via `getUser()` (not just JWT session which can be stale)
@@ -307,10 +310,18 @@ Re-scans all entries and finds reminders/suggestions/alerts/answers that were ov
 - [x] ~~Landing page mobile fix~~ — DONE in v0.3.1 (nav logo size, hero height)
 - [x] ~~Reminders auto-regeneration bug~~ — DONE in v0.3.1 (never auto-regenerate, user-triggered only)
 - [x] ~~Notion credentials cross-device~~ — DONE in v0.3.1 (getUser() for fresh metadata)
+- [x] ~~iOS input zoom~~ — DONE in v0.3.2 (font-size: 16px on all inputs)
+- [x] ~~Reminders banner not clearing~~ — DONE in v0.3.2 (processedIds as React state)
+- [x] ~~Notion edit sync~~ — DONE in v0.3.2 (autoUpdateNotionEntry on updateEntry)
+- [x] ~~Landing page mobile~~ — DONE in v0.3.2 (media queries, responsive grid)
+- [x] ~~Medical disclaimer~~ — DONE in v0.3.2 (AnalysisReport banner + landing footer)
+- [x] ~~Onboarding redesign~~ — DONE in v0.3.2 (Liquid Glass bottom sheet, English text)
+- [x] ~~Reminders tabbed UI~~ — DONE in v0.3.2 (swipe navigation, re-analyze button, due dates, browser notifications)
+- [x] ~~Thinking model JSON fix~~ — DONE in v0.3.2 (filter thought parts, extract JSON from preamble)
 - [ ] `entries_source_check` constraint only accepts 'manual' — should also accept 'import', 'notion'
 - [ ] `user_reminders` table may not exist on Supabase — run migration SQL to create it for cross-device persistence
 - [ ] Rate limiting for "Analyze all" — some days fail with 429
-- [ ] Push notifications for reminders (currently in-app only)
+- [ ] Push notifications for reminders (requires service worker + VAPID keys — currently browser-only via Notification API)
 
 ## Repo Structure
 ```

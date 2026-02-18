@@ -177,6 +177,7 @@
         }
         @media (max-width: 768px) {
             nav { padding: 10px 18px; gap: 10px; }
+            .nav-logo { font-size: 2rem; }
             .nav-hide { display: none; }
         }
 
@@ -269,8 +270,15 @@
             background: rgba(42, 42, 69, 0.95);
             box-shadow: 0 8px 24px rgba(42, 42, 69, 0.2);
         }
-        @media (max-width: 520px) {
-            .hero { padding: 120px 20px 50px; }
+        @media (max-width: 640px) {
+            .hero { min-height: auto; padding: 100px 20px 40px; }
+            .hero h1 { font-size: clamp(2.4rem, 10vw, 3.2rem); margin-bottom: 20px; }
+            .hero-sub { font-size: 1rem; margin-bottom: 32px; }
+            .hero-mockup { margin-top: 32px; }
+            section { padding: 60px 0; }
+            .features-grid { grid-template-columns: 1fr; }
+            .bottom-cta { padding: 60px 20px; }
+            .bottom-cta .section-title { font-size: 1.6rem; }
         }
 
         /* === MOCKUP === */
@@ -779,6 +787,9 @@
 
     <footer>
         <p>© 2026 Clarity. Built with purpose. <a href="/app/">Open app</a> · <a href="https://github.com/alessandrodamore-tech/clarity" target="_blank">GitHub</a></p>
+        <p style="margin-top: 10px; font-size: 0.68rem; opacity: 0.5; max-width: 480px; margin-left: auto; margin-right: auto; line-height: 1.5;">
+            Clarity is not a medical device and does not provide medical advice. AI-generated insights are for informational purposes only. Always consult a qualified healthcare professional.
+        </p>
     </footer>
 
     <script>
