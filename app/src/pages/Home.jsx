@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react'
 import { useNavigate, NavLink } from 'react-router-dom'
 import { useApp } from '../lib/store'
-import { BarChart3, Bell, Sparkles, ChevronDown, SendHorizontal } from 'lucide-react'
+import { BarChart3, Bell, Sparkles, ChevronDown, SendHorizontal, RefreshCw } from 'lucide-react'
 import EntryDetailModal from '../components/EntryDetailModal'
 import { generatePlaceholderHints } from '../lib/gemini'
 
@@ -58,6 +58,7 @@ export default function Home() {
       return cached.length > 0 && typeof cached[0] !== 'string'
     } catch { return false }
   })
+  const [hintsLoading, setHintsLoading] = useState(false)
 
   // Edit modal
   const [modal, setModal] = useState(null)
@@ -149,6 +150,24 @@ export default function Home() {
 
   const handleKeyDown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSubmit() }
+  }
+
+  const refreshHints = async () => {
+    if (hintsLoading || entries.length === 0) return
+    setHintsLoading(true)
+    setHintsVisible(false)
+    try {
+      const h = await generatePlaceholderHints(entries)
+      if (h && h.length > 0) {
+        setHints(h)
+        try {
+          localStorage.setItem('clarity_hints', JSON.stringify(h))
+          localStorage.setItem('clarity_hints_ts', Date.now().toString())
+        } catch {}
+        requestAnimationFrame(() => setHintsVisible(true))
+      }
+    } catch {}
+    setHintsLoading(false)
   }
 
   const openModal = (entry, el) => {
@@ -320,9 +339,26 @@ export default function Home() {
       {/* Input — fixed at bottom */}
       <div className="feed-input-bar">
         {/* Smart hints — right above input */}
-        {hints.length > 0 && !text.trim() && (
+        {!text.trim() && (hints.length > 0 || hintsLoading) && (
           <div className="hint-tray">
-            {hints.map((hint, i) => {
+            {/* Refresh button — always first, always visible */}
+            <button
+              className="hint-chip glass"
+              onClick={refreshHints}
+              disabled={hintsLoading}
+              style={{
+                opacity: hintsVisible || hintsLoading ? 0.7 : 0,
+                transform: hintsVisible || hintsLoading ? 'translateY(0)' : 'translateY(8px)',
+                transition: 'opacity 0.3s ease, transform 0.3s ease',
+                cursor: hintsLoading ? 'wait' : 'pointer',
+                border: 'none', padding: '8px 10px',
+                display: 'flex', alignItems: 'center',
+              }}
+              title="Refresh hints"
+            >
+              <RefreshCw size={13} style={hintsLoading ? { animation: 'spin 1s linear infinite' } : undefined} />
+            </button>
+            {!hintsLoading && hints.map((hint, i) => {
               const hasSource = hint.source_date && hint.source_time
               return (
                 <div

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Outlet, NavLink } from 'react-router-dom'
+import { Outlet, NavLink, useLocation } from 'react-router-dom'
 import { Settings, HelpCircle, X, PenLine, BarChart3, Bell, Sparkles } from 'lucide-react'
 
 function OnboardingOverlay({ onClose }) {
@@ -108,6 +108,7 @@ function OnboardingOverlay({ onClose }) {
 }
 
 export default function Layout() {
+  const location = useLocation()
   const [showOnboarding, setShowOnboarding] = useState(false)
 
   const iconLink = (to, Icon, label) => (
@@ -179,7 +180,9 @@ export default function Layout() {
         padding: '68px 16px 24px',
         maxWidth: 960, width: '100%', margin: '0 auto',
       }}>
-        <Outlet />
+        <div key={location.pathname} className="page-transition">
+          <Outlet />
+        </div>
       </main>
 
       {/* Onboarding overlay */}

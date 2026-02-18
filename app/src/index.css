@@ -207,6 +207,15 @@ body {
   to { opacity: 1; transform: translateY(0); }
 }
 
+/* === PAGE TRANSITIONS === */
+.page-transition {
+  animation: pageFadeIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+@keyframes pageFadeIn {
+  from { opacity: 0; transform: translateY(16px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
 /* === ENTRY ITEMS === */
 .entry-item {
   transition: transform 0.15s ease, box-shadow 0.15s ease;

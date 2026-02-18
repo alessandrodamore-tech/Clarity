@@ -12,12 +12,21 @@ export function AppProvider({ children }) {
 
   // Auth
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
       const u = session?.user ?? null
       setUser(u)
       setLoading(false)
-      // Hydrate Notion credentials from user metadata into localStorage
-      if (u) loadNotionCredentialsFromUser(u)
+      // Fetch fresh user metadata from server (session JWT may have stale metadata)
+      if (u) {
+        loadNotionCredentialsFromUser(u) // use cached first for speed
+        try {
+          const { data } = await supabase.auth.getUser()
+          if (data?.user) {
+            setUser(data.user)
+            loadNotionCredentialsFromUser(data.user)
+          }
+        } catch {}
+      }
     })
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
