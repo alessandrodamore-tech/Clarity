@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { useApp } from '../lib/store'
-import { loadCachedSummaries, generateReminders } from '../lib/gemini'
+import { supabase } from '../lib/supabase'
+import { loadCachedSummaries, generateReminders, findMissedReminders } from '../lib/gemini'
 import {
   Bell, Lightbulb, MessageCircle, AlertTriangle, CheckCircle2,
   RefreshCw, Search, ExternalLink, Square, CheckSquare,
@@ -21,28 +22,58 @@ function loadCachedReminders() {
   try { return JSON.parse(localStorage.getItem(CACHE_KEY) || 'null') } catch { return null }
 }
 
-function saveCachedReminders(data, hash) {
+function saveCachedReminders(data, hash, userId) {
   try {
     localStorage.setItem(CACHE_KEY, JSON.stringify(data))
     localStorage.setItem(HASH_KEY, hash)
     localStorage.setItem(SEEN_KEY, Date.now().toString())
   } catch {}
+  // Persist to Supabase (fire-and-forget)
+  if (userId) {
+    supabase.from('user_reminders').upsert({
+      user_id: userId,
+      reminders_data: data,
+      entries_hash: hash,
+      processed_ids: [...(loadProcessedIds())],
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'user_id' }).then(({ error }) => {
+      if (error) console.warn('Failed to save reminders to Supabase:', error)
+    })
+  }
 }
 
 function loadDoneSet() {
   try { return new Set(JSON.parse(localStorage.getItem(DONE_KEY) || '[]')) } catch { return new Set() }
 }
 
-function saveDoneSet(doneSet) {
+function saveDoneSet(doneSet, userId) {
   try { localStorage.setItem(DONE_KEY, JSON.stringify([...doneSet])) } catch {}
+  if (userId) {
+    supabase.from('user_reminders').upsert({
+      user_id: userId,
+      done_items: [...doneSet],
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'user_id' }).then(({ error }) => {
+      if (error) console.warn('Failed to save done state to Supabase:', error)
+    })
+  }
 }
 
 function loadProcessedIds() {
   try { return new Set(JSON.parse(localStorage.getItem(PROCESSED_IDS_KEY) || '[]')) } catch { return new Set() }
 }
 
-function saveProcessedIds(ids) {
+function saveProcessedIds(ids, userId) {
   try { localStorage.setItem(PROCESSED_IDS_KEY, JSON.stringify([...ids])) } catch {}
+  if (userId) {
+    supabase.from('user_reminders').upsert({
+      user_id: userId,
+      processed_ids: [...ids],
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'user_id' }).then(({ error }) => {
+      if (error) console.warn('Failed to save processed IDs to Supabase:', error)
+    })
+  }
 }
 
 const severityColors = {
@@ -63,12 +94,16 @@ export default function Reminders() {
   const { user, entries } = useApp()
   const [data, setData] = useState(loadCachedReminders)
   const [loading, setLoading] = useState(false)
+  const [scanning, setScanning] = useState(false)
   const [error, setError] = useState(null)
   const [mounted, setMounted] = useState(false)
   const [daySummaries, setDaySummaries] = useState({})
   const [doneSet, setDoneSet] = useState(loadDoneSet)
 
-  useEffect(() => { requestAnimationFrame(() => setMounted(true)) }, [])
+  useEffect(() => {
+    window.scrollTo(0, 0)
+    requestAnimationFrame(() => setMounted(true))
+  }, [])
 
   // Mark as seen
   useEffect(() => {
@@ -79,6 +114,34 @@ export default function Reminders() {
   useEffect(() => {
     if (!user?.id) return
     loadCachedSummaries(user.id).then(cache => setDaySummaries(cache))
+  }, [user])
+
+  // Load reminders from Supabase (wins over localStorage)
+  useEffect(() => {
+    if (!user?.id) return
+    supabase
+      .from('user_reminders')
+      .select('reminders_data, done_items, processed_ids, entries_hash')
+      .eq('user_id', user.id)
+      .maybeSingle()
+      .then(({ data: row }) => {
+        if (!row) return
+        if (row.reminders_data) {
+          setData(row.reminders_data)
+          try { localStorage.setItem(CACHE_KEY, JSON.stringify(row.reminders_data)) } catch {}
+        }
+        if (row.done_items) {
+          const set = new Set(row.done_items)
+          setDoneSet(set)
+          try { localStorage.setItem(DONE_KEY, JSON.stringify(row.done_items)) } catch {}
+        }
+        if (row.processed_ids) {
+          try { localStorage.setItem(PROCESSED_IDS_KEY, JSON.stringify(row.processed_ids)) } catch {}
+        }
+        if (row.entries_hash) {
+          try { localStorage.setItem(HASH_KEY, row.entries_hash) } catch {}
+        }
+      })
   }, [user])
 
   // Compute entries hash (last 14 days)
@@ -125,19 +188,19 @@ export default function Reminders() {
           alerts: [...(existing.alerts || []), ...(result.alerts || [])],
         }
         setData(merged)
-        saveCachedReminders(merged, recentHash)
+        saveCachedReminders(merged, recentHash, user?.id)
         // doneSet preserved — no clearing
       } else {
         // Full regeneration
         const result = await generateReminders(entries, daySummaries)
         setData(result)
-        saveCachedReminders(result, recentHash)
+        saveCachedReminders(result, recentHash, user?.id)
         setDoneSet(new Set())
-        saveDoneSet(new Set())
+        saveDoneSet(new Set(), user?.id)
       }
       // Update processed IDs to all current recent entry IDs
       const allIds = new Set(entries.map(e => e.id))
-      saveProcessedIds(allIds)
+      saveProcessedIds(allIds, user?.id)
     } catch (e) {
       setError(e.message || 'Failed to generate reminders')
     } finally {
@@ -145,24 +208,55 @@ export default function Reminders() {
     }
   }, [entries, daySummaries, recentHash, loading])
 
-  // Auto-generate if entries changed since last generation
+  // Auto-generate: first visit = full, then only incremental for new entries
   useEffect(() => {
-    if (!recentHash || !entries?.length) return
-    const storedHash = localStorage.getItem(HASH_KEY)
-    if (storedHash !== recentHash && !loading) {
-      // Incremental if we have existing data and tracking info
-      const hasTracking = loadProcessedIds().size > 0
-      const hasCache = !!loadCachedReminders()
-      generate(hasTracking && hasCache)
+    if (!recentHash || !entries?.length || loading) return
+    const hasCache = !!loadCachedReminders()
+    if (!hasCache) {
+      generate(false) // first time ever — full generation
+    } else {
+      // Check if there are unprocessed entries → integrate incrementally
+      const processedIds = loadProcessedIds()
+      const cutoff = new Date()
+      cutoff.setDate(cutoff.getDate() - 14)
+      const cutoffStr = cutoff.toISOString().slice(0, 10)
+      const hasNew = entries.some(e => e.entry_date >= cutoffStr && !processedIds.has(e.id))
+      if (hasNew) generate(true) // incremental only — merge, never replace
     }
   }, [recentHash, entries?.length]) // intentionally not including generate to avoid loops
+
+  const scanMissed = useCallback(async () => {
+    if (!entries?.length || scanning || loading) return
+    setScanning(true)
+    setError(null)
+    try {
+      const existing = dataRef.current || { reminders: [], answers: [], suggestions: [], alerts: [] }
+      const result = await findMissedReminders(entries, existing)
+      const hasNew = (result.reminders?.length || 0) + (result.answers?.length || 0) +
+        (result.suggestions?.length || 0) + (result.alerts?.length || 0) > 0
+      if (hasNew) {
+        const merged = {
+          reminders: [...(existing.reminders || []), ...(result.reminders || [])],
+          answers: [...(existing.answers || []), ...(result.answers || [])],
+          suggestions: [...(existing.suggestions || []), ...(result.suggestions || [])],
+          alerts: [...(existing.alerts || []), ...(result.alerts || [])],
+        }
+        setData(merged)
+        saveCachedReminders(merged, recentHash, user?.id)
+      }
+    } catch (e) {
+      setError(e.message || 'Failed to scan for missed reminders')
+    } finally {
+      setScanning(false)
+    }
+  }, [entries, scanning, loading, recentHash, user])
 
   const toggleDone = (key) => {
     setDoneSet(prev => {
       const next = new Set(prev)
       if (next.has(key)) next.delete(key)
       else next.add(key)
-      saveDoneSet(next)
+      saveDoneSet(next, user?.id)
       return next
     })
   }
@@ -258,36 +352,7 @@ export default function Reminders() {
         </div>
       )}
 
-      {/* ── ALERTS (top priority) ── */}
-      {!loading && hasAlerts && (
-        <div style={{ marginBottom: '1.25rem', ...sectionAnim(0) }}>
-          {data.alerts
-            .sort((a, b) => (priorityOrder[a.severity] || 2) - (priorityOrder[b.severity] || 2))
-            .map((alert, i) => {
-              const s = severityColors[alert.severity] || severityColors.medium
-              return (
-                <div key={i} style={{
-                  padding: '14px 16px', borderRadius: 14, marginBottom: 10,
-                  background: s.bg, border: `1px solid ${s.border}`,
-                  display: 'flex', gap: 12, alignItems: 'flex-start',
-                }}>
-                  <AlertTriangle size={18} style={{ color: s.color, flexShrink: 0, marginTop: 1 }} />
-                  <div style={{ flex: 1 }}>
-                    <h4 style={{
-                      fontFamily: 'var(--font-display)', fontWeight: 600,
-                      fontSize: '0.88rem', color: s.color, margin: '0 0 4px',
-                    }}>{alert.title}</h4>
-                    <p style={{ color: 'var(--text-muted)', fontSize: '0.82rem', lineHeight: 1.7, margin: 0 }}>
-                      {alert.detail}
-                    </p>
-                  </div>
-                </div>
-              )
-            })}
-        </div>
-      )}
-
-      {/* ── REMINDERS (active) ── */}
+      {/* ── REMINDERS (active) — first section ── */}
       {!loading && activeReminders.length > 0 && (
         <div className="glass" style={{
           borderRadius: 'var(--radius-lg)', padding: '1.5rem', marginBottom: '1.25rem',
@@ -337,6 +402,29 @@ export default function Reminders() {
               </div>
             ))}
           </div>
+          {/* Find missed — inside card */}
+          {!scanning ? (
+            <button
+              onClick={scanMissed}
+              style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                width: '100%', marginTop: 12, padding: '9px 0',
+                background: 'none', border: '1px dashed rgba(150,150,170,0.25)',
+                borderRadius: 10, cursor: 'pointer',
+                color: 'var(--text-light)', fontSize: '0.75rem',
+                fontFamily: 'var(--font-display)', fontWeight: 600,
+                transition: 'color 0.2s, border-color 0.2s',
+              }}
+            >
+              <Search size={12} />
+              Find missed reminders
+            </button>
+          ) : (
+            <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <div className="shimmer-pill" style={{ width: '100%', height: 12 }} />
+              <div className="shimmer-pill" style={{ width: '75%', height: 12 }} />
+            </div>
+          )}
         </div>
       )}
 
@@ -390,6 +478,35 @@ export default function Reminders() {
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {/* ── ALERTS ── */}
+      {!loading && hasAlerts && (
+        <div style={{ marginBottom: '1.25rem', ...sectionAnim(120) }}>
+          {data.alerts
+            .sort((a, b) => (priorityOrder[a.severity] || 2) - (priorityOrder[b.severity] || 2))
+            .map((alert, i) => {
+              const s = severityColors[alert.severity] || severityColors.medium
+              return (
+                <div key={i} style={{
+                  padding: '14px 16px', borderRadius: 14, marginBottom: 10,
+                  background: s.bg, border: `1px solid ${s.border}`,
+                  display: 'flex', gap: 12, alignItems: 'flex-start',
+                }}>
+                  <AlertTriangle size={18} style={{ color: s.color, flexShrink: 0, marginTop: 1 }} />
+                  <div style={{ flex: 1 }}>
+                    <h4 style={{
+                      fontFamily: 'var(--font-display)', fontWeight: 600,
+                      fontSize: '0.88rem', color: s.color, margin: '0 0 4px',
+                    }}>{alert.title}</h4>
+                    <p style={{ color: 'var(--text-muted)', fontSize: '0.82rem', lineHeight: 1.7, margin: 0 }}>
+                      {alert.detail}
+                    </p>
+                  </div>
+                </div>
+              )
+            })}
         </div>
       )}
 
@@ -483,6 +600,7 @@ export default function Reminders() {
           </div>
         </div>
       )}
+
 
       <style>{`
         @keyframes slideUp {

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react'
 import { useNavigate, NavLink } from 'react-router-dom'
 import { useApp } from '../lib/store'
 import { BarChart3, Bell, Sparkles, ChevronDown, SendHorizontal } from 'lucide-react'
-import EditEntryModal from '../components/EditEntryModal'
+import EntryDetailModal from '../components/EntryDetailModal'
 import { generatePlaceholderHints } from '../lib/gemini'
 
 function nowDate() { return new Date().toISOString().slice(0, 10) }
@@ -403,7 +403,7 @@ export default function Home() {
       </div>
 
       {/* Edit modal */}
-      <EditEntryModal
+      <EntryDetailModal
         entry={modal}
         modalOrigin={modalOrigin}
         modalClosing={modalClosing}

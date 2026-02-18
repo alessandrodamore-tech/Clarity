@@ -731,13 +731,19 @@ body {
   display: flex;
   flex-wrap: nowrap;
   gap: 8px;
-  padding: 0 0 8px;
-  justify-content: center;
+  padding: 0 4px 8px;
+  justify-content: safe center;
   overflow-x: auto;
   overflow-y: hidden;
   -webkit-overflow-scrolling: touch;
   scrollbar-width: none;
   margin: 0;
+}
+.hint-tray::before,
+.hint-tray::after {
+  content: '';
+  flex-shrink: 0;
+  width: 1px;
 }
 .hint-tray::-webkit-scrollbar {
   display: none;
@@ -1059,6 +1065,48 @@ body {
   .bottom-nav-btn {
     -webkit-tap-highlight-color: transparent;
   }
+}
+
+/* === ENTRY DETAIL MODAL (AI actions) === */
+.entry-action-tray {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.hint-chip-active {
+  background: rgba(232, 168, 56, 0.15) !important;
+  border: 1px solid rgba(232, 168, 56, 0.3) !important;
+  color: var(--amber) !important;
+}
+
+.entry-ai-result {
+  margin-top: 12px;
+  animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.entry-read-text {
+  font-size: 0.95rem;
+  line-height: 1.75;
+  color: var(--navy);
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+.entry-ai-prose {
+  font-size: 0.88rem;
+  line-height: 1.7;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+.entry-ask-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+  align-items: flex-end;
 }
 
 /* Small phones (iPhone SE etc) */

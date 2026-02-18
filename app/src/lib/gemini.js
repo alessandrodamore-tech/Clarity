@@ -167,6 +167,7 @@ async function callGemini(prompt, { maxOutputTokens = 8192, temperature = 0.1, j
       const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '{}'
       const finishReason = data?.candidates?.[0]?.finishReason
       const clean = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
+      if (!jsonMode) return clean
       if (finishReason === 'MAX_TOKENS') {
         console.warn('Gemini response truncated (MAX_TOKENS) — attempting repair')
       }
@@ -610,4 +611,106 @@ Return JSON: {"hints": [{"text": "prompt text", "source_date": "YYYY-MM-DD or nu
     console.warn('Failed to generate placeholder hints:', e)
     return null
   }
+}
+
+// ─── PER-ENTRY AI ACTIONS ────────────────────────────────
+export async function analyzeEntry(entry, actionType, question) {
+  if (!entry?.text) throw new Error('No entry text provided')
+
+  const userContext = getUserContext()
+  const userContextBlock = userContext
+    ? `\nUSER CONTEXT (personal background, conditions, instructions):\n${userContext}\n`
+    : ''
+
+  const entryBlock = `ENTRY (${entry.entry_date} ${entry.entry_time || ''}):\n${entry.text}`
+
+  const prompts = {
+    analyze: `You are a clinical wellness analyst. Analyze this journal entry in depth — emotional state, energy level, behaviors, cause-effect patterns, wellness signals. Write 3-5 paragraphs. Be specific, cite parts of the text.
+${userContextBlock}
+${entryBlock}
+
+Respond in the SAME LANGUAGE as the entry text.`,
+
+    ask: `You are a knowledgeable assistant. Answer the user's question in the context of their journal entry. Write 2-5 paragraphs. Cite relevant parts of the entry where useful. Be thorough and genuinely helpful.
+${userContextBlock}
+${entryBlock}
+
+USER QUESTION: ${question || ''}
+
+Respond in the SAME LANGUAGE as the question (or the entry if no clear language preference).`,
+  }
+
+  const prompt = prompts[actionType]
+  if (!prompt) throw new Error(`Unknown action type: ${actionType}`)
+
+  return await callGemini(prompt, { maxOutputTokens: 4096, temperature: 0.3, jsonMode: false, retries: 1 })
+}
+
+// ─── FIND MISSED REMINDERS ───────────────────────────────
+export async function findMissedReminders(entries, existingData) {
+  if (!entries?.length) throw new Error('No entries provided')
+
+  const today = new Date()
+  const cutoff = new Date(today)
+  cutoff.setDate(cutoff.getDate() - 14)
+  const cutoffStr = cutoff.toISOString().slice(0, 10)
+
+  const recentEntries = entries
+    .filter(e => e.entry_date >= cutoffStr)
+    .sort((a, b) => a.entry_date.localeCompare(b.entry_date) || (a.entry_time || '').localeCompare(b.entry_time || ''))
+
+  if (!recentEntries.length) throw new Error('No recent entries')
+
+  const entriesText = recentEntries
+    .map(e => `[${e.entry_date} ${e.entry_time || ''}] ${e.text}`)
+    .join('\n')
+
+  const existingReminders = (existingData?.reminders || []).map(r => r.text).join('\n- ')
+  const existingSuggestions = (existingData?.suggestions || []).map(s => s.text).join('\n- ')
+  const existingAlerts = (existingData?.alerts || []).map(a => a.title).join('\n- ')
+  const existingAnswers = (existingData?.answers || []).map(a => a.question).join('\n- ')
+
+  const sampleText = recentEntries.slice(0, 5).map(e => e.text).join(' ')
+
+  const userContext = getUserContext()
+  const userContextBlock = userContext
+    ? `\nUSER CONTEXT:\n${userContext}\n`
+    : ''
+
+  const prompt = `You are a meticulous personal assistant. The user already has a list of reminders, suggestions, answers and alerts extracted from their journal. They believe something is MISSING. Your job is to carefully re-read every entry and find items that were overlooked.
+${userContextBlock}
+CRITICAL: Write in the SAME LANGUAGE as the entries. Sample: "${sampleText.slice(0, 200)}"
+
+TODAY: ${today.toISOString().slice(0, 10)}
+
+ENTRIES (last 14 days):
+${entriesText}
+
+ALREADY EXTRACTED (do NOT repeat these):
+${existingReminders ? `Reminders:\n- ${existingReminders}` : 'Reminders: (none)'}
+${existingSuggestions ? `Suggestions:\n- ${existingSuggestions}` : 'Suggestions: (none)'}
+${existingAlerts ? `Alerts:\n- ${existingAlerts}` : 'Alerts: (none)'}
+${existingAnswers ? `Answers:\n- ${existingAnswers}` : 'Answers: (none)'}
+
+Find ONLY what's missing. Look very carefully for:
+- Implicit tasks ("dovrei", "bisognerebbe", "sarebbe bene", "prima o poi")
+- Mentioned appointments, deadlines, follow-ups that weren't captured
+- Questions the user asked themselves that went unanswered
+- Health patterns or concerns not flagged
+- Practical suggestions the existing list missed
+
+Return JSON with ONLY new items (empty [] sections are fine if nothing was missed):
+{
+  "reminders": [{ "text": "string", "source_date": "YYYY-MM-DD", "source_excerpt": "brief quote", "priority": "high|medium|low", "action_hint": "optional" }],
+  "answers": [{ "question": "string", "answer": "detailed answer", "source_date": "YYYY-MM-DD", "search_query": "optional" }],
+  "suggestions": [{ "text": "string", "type": "positive|warning|info", "based_on": "evidence" }],
+  "alerts": [{ "title": "string", "detail": "string", "severity": "high|medium|low" }]
+}
+
+Rules:
+- NEVER repeat items already in the existing list
+- Only include genuinely missed items — if nothing was missed, return all empty arrays
+- Be thorough: re-read every single entry word by word`
+
+  return await callGemini(prompt, { maxOutputTokens: 8192, temperature: 0.2, retries: 1 })
 }

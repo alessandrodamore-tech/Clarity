@@ -4,7 +4,7 @@ import { useApp } from '../lib/store'
 import { ArrowLeft, RefreshCw, Loader2, Check, X, Plus } from 'lucide-react'
 import { extractDayData, loadCachedSummaries } from '../lib/gemini'
 import { TYPE_ICON, TYPE_COLORS } from '../lib/constants'
-import EditEntryModal from '../components/EditEntryModal'
+import EntryDetailModal from '../components/EntryDetailModal'
 import EmptyState from '../components/EmptyState'
 import { FeatureHint } from '../components/Onboarding'
 
@@ -283,7 +283,7 @@ export default function DayDetail() {
       )}
 
       {/* EDIT MODAL */}
-      <EditEntryModal
+      <EntryDetailModal
         entry={modal}
         modalOrigin={modalOrigin}
         modalClosing={modalClosing}

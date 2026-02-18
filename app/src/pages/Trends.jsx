@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useApp } from '../lib/store'
+import { supabase } from '../lib/supabase'
 import { loadCachedSummaries, generateGlobalInsights } from '../lib/gemini'
 import WellnessHero from '../components/trends/WellnessHero'
 import AnalysisReport from '../components/trends/AnalysisReport'
@@ -22,7 +23,7 @@ export default function Trends() {
   // Analyzed days from Supabase cache
   const [daySummaries, setDaySummaries] = useState({})
 
-  // AI Report — persisted in localStorage (new key)
+  // AI Report — persisted in localStorage + Supabase
   const [report, setReport] = useState(() => {
     try { return JSON.parse(localStorage.getItem('clarity_global_report') || 'null') } catch { return null }
   })
@@ -35,6 +36,22 @@ export default function Trends() {
   useEffect(() => {
     if (!user?.id) return
     loadCachedSummaries(user.id).then(cache => setDaySummaries(cache))
+  }, [user])
+
+  // Load report from Supabase (wins over localStorage)
+  useEffect(() => {
+    if (!user?.id) return
+    supabase
+      .from('user_reports')
+      .select('report_data')
+      .eq('user_id', user.id)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (data?.report_data) {
+          setReport(data.report_data)
+          try { localStorage.setItem('clarity_global_report', JSON.stringify(data.report_data)) } catch {}
+        }
+      })
   }, [user])
 
   // ─── CORE COMPUTATIONS ─────────────────────────────────
@@ -62,6 +79,16 @@ export default function Trends() {
       const result = await generateGlobalInsights(analyzedDays)
       setReport(result)
       try { localStorage.setItem('clarity_global_report', JSON.stringify(result)) } catch {}
+      // Persist to Supabase
+      if (user?.id) {
+        supabase.from('user_reports').upsert({
+          user_id: user.id,
+          report_data: result,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'user_id' }).then(({ error }) => {
+          if (error) console.warn('Failed to save report to Supabase:', error)
+        })
+      }
     } catch (e) {
       setReportError(e.message || 'Failed to generate report')
     } finally {
