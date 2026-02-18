@@ -1,10 +1,10 @@
 {
   "installCommand": "cd app && npm install",
-  "buildCommand": "cd app && npm run build",
+  "buildCommand": "cd app && npm run build && mv dist/index.html dist/app.html && mv dist/landing.html dist/index.html",
   "outputDirectory": "app/dist",
   "rewrites": [
     { "source": "/api/:path*", "destination": "/api/:path*" },
-    { "source": "/", "destination": "/landing.html" },
-    { "source": "/(.*)", "destination": "/index.html" }
+    { "source": "/app/:path*", "destination": "/app.html" },
+    { "source": "/login", "destination": "/app.html" }
   ]
 }
