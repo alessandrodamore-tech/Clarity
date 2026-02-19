@@ -2,10 +2,11 @@ import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { useApp } from '../lib/store'
 import { supabase } from '../lib/supabase'
 import { loadCachedSummaries, generateReminders } from '../lib/gemini'
+import { stableKey } from '../lib/utils'
 import {
   Bell, Lightbulb, MessageCircle, AlertTriangle, CheckCircle2,
   RefreshCw, Search, ExternalLink, Square, CheckSquare,
-  ChevronDown, ChevronRight, Archive, RotateCcw,
+  ChevronDown, ChevronRight, Archive, RotateCcw, Sparkles,
 } from 'lucide-react'
 
 const CACHE_KEY = 'clarity_reminders'
@@ -14,6 +15,7 @@ const HASH_KEY = 'clarity_reminders_hash'
 const DONE_KEY = 'clarity_reminders_done'
 const PROCESSED_IDS_KEY = 'clarity_reminders_processed_ids'
 const NOTIF_KEY = 'clarity_notif_sent'
+const AUTO_COMPLETED_KEY = 'clarity_reminders_auto_completed'
 
 function hashEntries(entries) {
   return entries.map(e => e.id).sort().join('|')
@@ -76,6 +78,14 @@ function saveProcessedIds(ids, userId) {
   }
 }
 
+function loadAutoCompleted() {
+  try { return new Set(JSON.parse(localStorage.getItem(AUTO_COMPLETED_KEY) || '[]')) } catch { return new Set() }
+}
+
+function saveAutoCompleted(set) {
+  try { localStorage.setItem(AUTO_COMPLETED_KEY, JSON.stringify([...set])) } catch {}
+}
+
 // ─── NOTIFICATIONS ────────────────────────────────────────
 async function requestNotificationPermission() {
   if (!('Notification' in window)) return false
@@ -88,7 +98,6 @@ async function requestNotificationPermission() {
 function showDueNotifications(reminders, doneSet) {
   if (!('Notification' in window) || Notification.permission !== 'granted') return
   const today = new Date().toISOString().slice(0, 10)
-  // Track which notifications were already sent today
   let sent
   try { sent = new Set(JSON.parse(localStorage.getItem(NOTIF_KEY) || '[]')) } catch { sent = new Set() }
   const newSent = [...sent]
@@ -109,6 +118,40 @@ function showDueNotifications(reminders, doneSet) {
   try { localStorage.setItem(NOTIF_KEY, JSON.stringify(newSent)) } catch {}
 }
 
+// ─── SMART ORDERING ──────────────────────────────────────
+function smartSort(reminders) {
+  const today = new Date().toISOString().slice(0, 10)
+  const priorityRank = { high: 0, medium: 1, low: 2 }
+
+  return [...reminders].sort((a, b) => {
+    const aDate = a.due_date || ''
+    const bDate = b.due_date || ''
+    const aPri = priorityRank[a.priority] ?? 3
+    const bPri = priorityRank[b.priority] ?? 3
+
+    // Category: overdue, today, high-no-date, upcoming, medium-no-date, low-no-date, none
+    function category(r) {
+      const d = r.due_date || ''
+      const p = priorityRank[r.priority] ?? 3
+      if (d && d < today) return 0 // overdue
+      if (d && d === today) return 1 // today
+      if (!d && p === 0) return 2 // high priority no date
+      if (d && d > today) return 3 // upcoming
+      if (!d && p === 1) return 4 // medium no date
+      if (!d && p === 2) return 5 // low no date
+      return 6 // no priority no date
+    }
+
+    const ca = category(a), cb = category(b)
+    if (ca !== cb) return ca - cb
+
+    // Within same category
+    if (ca === 0) return (aDate).localeCompare(bDate) // oldest overdue first
+    if (ca === 3) return (aDate).localeCompare(bDate) // nearest upcoming first
+    return aPri - bPri
+  })
+}
+
 // ─── HELPERS ──────────────────────────────────────────────
 const suggestionTypeConfig = {
   positive: { color: '#3a8a6a', bg: 'rgba(58,138,106,0.10)', icon: CheckCircle2 },
@@ -126,6 +169,13 @@ function formatDueDate(due) {
   return { label, isOverdue, isToday }
 }
 
+function addKeysToItems(items, prefix) {
+  return (items || []).map(item => ({
+    ...item,
+    _key: stableKey(item.text || item.question, item.source_date, prefix),
+  }))
+}
+
 // ─── COMPONENT ────────────────────────────────────────────
 export default function Reminders() {
   const { user, entries } = useApp()
@@ -136,8 +186,10 @@ export default function Reminders() {
   const [mounted, setMounted] = useState(false)
   const [daySummaries, setDaySummaries] = useState({})
   const [doneSet, setDoneSet] = useState(loadDoneSet)
+  const [autoCompleted, setAutoCompleted] = useState(loadAutoCompleted)
   const [supabaseLoaded, setSupabaseLoaded] = useState(false)
   const [processedIds, setProcessedIds] = useState(() => loadProcessedIds())
+  const [completing, setCompleting] = useState(null) // _key being animated
 
   useEffect(() => {
     window.scrollTo(0, 0)
@@ -186,7 +238,7 @@ export default function Reminders() {
       .finally(() => setSupabaseLoaded(true))
   }, [user])
 
-  // Count new (unprocessed) entries — drives auto-update
+  // Count new (unprocessed) entries
   const newEntryCount = useMemo(() => {
     if (!entries?.length) return 0
     const cutoff = new Date()
@@ -205,7 +257,6 @@ export default function Reminders() {
     return hashEntries(recent)
   }, [entries])
 
-  // Use ref to access current data in generate without adding it as dependency
   const dataRef = useRef(data)
   useEffect(() => { dataRef.current = data }, [data])
 
@@ -215,6 +266,11 @@ export default function Reminders() {
     else setLoading(true)
     setError(null)
     try {
+      // Build active reminders for AI auto-completion
+      const activeRems = (dataRef.current?.reminders || [])
+        .map(r => ({ _key: stableKey(r.text, r.source_date, 'rem'), text: r.text }))
+        .filter(r => !doneSet.has(r._key))
+
       if (incremental) {
         const currentProcessedIds = loadProcessedIds()
         const cutoff = new Date()
@@ -227,22 +283,47 @@ export default function Reminders() {
           localStorage.setItem(HASH_KEY, recentHash)
           return
         }
-        const result = await generateReminders(newEntries, daySummaries)
+        const result = await generateReminders(newEntries, daySummaries, activeRems)
         const existing = dataRef.current || { reminders: [], answers: [], suggestions: [], alerts: [] }
+
+        // Deduplicate: compute keys for existing items
+        const existingRemKeys = new Set(addKeysToItems(existing.reminders, 'rem').map(r => r._key))
+        const existingAnsKeys = new Set(addKeysToItems(existing.answers, 'ans').map(a => a._key))
+        const existingSugKeys = new Set(addKeysToItems(existing.suggestions, 'sug').map(s => s._key))
+
+        const newRems = addKeysToItems(result.reminders, 'rem').filter(r => !existingRemKeys.has(r._key))
+        const newAns = addKeysToItems(result.answers, 'ans').filter(a => !existingAnsKeys.has(a._key))
+        const newSugs = addKeysToItems(result.suggestions, 'sug').filter(s => !existingSugKeys.has(s._key))
+
         const merged = {
-          reminders: [...(existing.reminders || []), ...(result.reminders || [])],
-          answers: [...(existing.answers || []), ...(result.answers || [])],
-          suggestions: [...(existing.suggestions || []), ...(result.suggestions || [])],
+          reminders: [...(existing.reminders || []), ...newRems],
+          answers: [...(existing.answers || []), ...newAns],
+          suggestions: [...(existing.suggestions || []), ...newSugs],
           alerts: [...(existing.alerts || []), ...(result.alerts || [])],
         }
         setData(merged)
         saveCachedReminders(merged, recentHash, user?.id)
+
+        // Handle AI auto-completed reminders
+        handleAutoCompleted(result)
       } else {
-        const result = await generateReminders(entries, daySummaries)
+        const result = await generateReminders(entries, daySummaries, activeRems)
         setData(result)
         saveCachedReminders(result, recentHash, user?.id)
-        setDoneSet(new Set())
-        saveDoneSet(new Set(), user?.id)
+
+        // Preserve done state: compute new keys, clean up stale
+        const newKeys = new Set(addKeysToItems(result.reminders, 'rem').map(r => r._key))
+        setDoneSet(prev => {
+          const next = new Set()
+          for (const key of prev) {
+            if (newKeys.has(key)) next.add(key) // keep if still exists
+          }
+          saveDoneSet(next, user?.id)
+          return next
+        })
+
+        // Handle AI auto-completed reminders
+        handleAutoCompleted(result)
       }
       const allIds = new Set(entries.map(e => e.id))
       saveProcessedIds(allIds, user?.id)
@@ -253,7 +334,24 @@ export default function Reminders() {
       setLoading(false)
       setUpdating(false)
     }
-  }, [entries, daySummaries, recentHash, loading, updating])
+  }, [entries, daySummaries, recentHash, loading, updating, doneSet])
+
+  function handleAutoCompleted(result) {
+    if (Array.isArray(result.completed_reminders) && result.completed_reminders.length > 0) {
+      setDoneSet(prev => {
+        const next = new Set(prev)
+        result.completed_reminders.forEach(k => next.add(k))
+        saveDoneSet(next, user?.id)
+        return next
+      })
+      setAutoCompleted(prev => {
+        const next = new Set(prev)
+        result.completed_reminders.forEach(k => next.add(k))
+        saveAutoCompleted(next)
+        return next
+      })
+    }
+  }
 
   // First-ever visit: auto-generate if no cache
   const autoGenDone = useRef(false)
@@ -273,58 +371,73 @@ export default function Reminders() {
     generate(true)
   }, [newEntryCount, supabaseLoaded, data])
 
-  // Notifications: request permission and notify due reminders
+  // Notifications
   useEffect(() => {
     if (!data?.reminders?.length) return
     requestNotificationPermission().then(granted => {
       if (!granted) return
-      const keyed = data.reminders.map((r, i) => ({ ...r, _key: `rem-${i}` }))
+      const keyed = addKeysToItems(data.reminders, 'rem')
       showDueNotifications(keyed, doneSet)
     })
   }, [data])
 
   const toggleDone = (key) => {
-    setDoneSet(prev => {
-      const next = new Set(prev)
-      if (next.has(key)) next.delete(key)
-      else next.add(key)
-      saveDoneSet(next, user?.id)
-      return next
-    })
+    if (doneSet.has(key)) {
+      // Unchecking — immediate
+      setDoneSet(prev => {
+        const next = new Set(prev)
+        next.delete(key)
+        saveDoneSet(next, user?.id)
+        return next
+      })
+      // Remove from auto-completed if it was there
+      setAutoCompleted(prev => {
+        const next = new Set(prev)
+        next.delete(key)
+        saveAutoCompleted(next)
+        return next
+      })
+    } else {
+      // Checking — animate first
+      setCompleting(key)
+      setTimeout(() => {
+        setDoneSet(prev => {
+          const next = new Set(prev)
+          next.add(key)
+          saveDoneSet(next, user?.id)
+          return next
+        })
+        setCompleting(null)
+      }, 400)
+    }
   }
 
   const [showArchived, setShowArchived] = useState(false)
 
-  // Split reminders into active/archived
+  // Split reminders into active/archived with smart sort
   const { activeReminders, archivedReminders } = useMemo(() => {
     if (!data?.reminders?.length) return { activeReminders: [], archivedReminders: [] }
-    const sorted = data.reminders
-      .map((rem, i) => ({ ...rem, _key: `rem-${i}` }))
-      .sort((a, b) => {
-        // Sort by due_date first, then source_date
-        const da = a.due_date || a.source_date || ''
-        const db = b.due_date || b.source_date || ''
-        return da.localeCompare(db)
-      })
+    const keyed = addKeysToItems(data.reminders, 'rem')
+    const active = keyed.filter(r => !doneSet.has(r._key) && completing !== r._key)
+    const archived = keyed.filter(r => doneSet.has(r._key) || completing === r._key)
     return {
-      activeReminders: sorted.filter(r => !doneSet.has(r._key)),
-      archivedReminders: sorted.filter(r => doneSet.has(r._key)),
+      activeReminders: smartSort(active),
+      archivedReminders: archived,
     }
-  }, [data?.reminders, doneSet])
+  }, [data?.reminders, doneSet, completing])
 
-  // Active answers and suggestions (not done)
   const activeAnswers = useMemo(() =>
-    (data?.answers || []).map((a, i) => ({ ...a, _key: `ans-${i}` })).filter(a => !doneSet.has(a._key)),
+    addKeysToItems(data?.answers, 'ans').filter(a => !doneSet.has(a._key)),
     [data?.answers, doneSet]
   )
   const activesuggestions = useMemo(() =>
-    (data?.suggestions || []).map((s, i) => ({ ...s, _key: `sug-${i}` })).filter(s => !doneSet.has(s._key)),
+    addKeysToItems(data?.suggestions, 'sug').filter(s => !doneSet.has(s._key)),
     [data?.suggestions, doneSet]
   )
 
-  // ── Tab navigation ──────────────────────────────────────
+  // Tab navigation
   const [activeTab, setActiveTab] = useState(0)
-  const [slideDir, setSlideDir] = useState(0) // 1 = from right, -1 = from left
+  const [slideDir, setSlideDir] = useState(0)
   const touchStartX = useRef(null)
 
   const goToTab = (idx) => {
@@ -359,7 +472,6 @@ export default function Reminders() {
             Smart insights from your recent entries
           </p>
         </div>
-        {/* Re-analyze button */}
         <button
           onClick={() => generate(false)}
           disabled={loading || updating || !entries?.length}
@@ -415,7 +527,7 @@ export default function Reminders() {
         </div>
       )}
 
-      {/* Tab bar + content — shown when data loaded and entries exist */}
+      {/* Tab bar + content */}
       {!loading && entries?.length > 0 && (
         <>
           {/* Tab bar */}
@@ -464,7 +576,7 @@ export default function Reminders() {
                   : undefined,
               }}
             >
-              {/* ── REMINDERS panel ── */}
+              {/* REMINDERS panel */}
               {activeTab === 0 && (
                 <>
                   {activeReminders.length > 0 ? (
@@ -472,18 +584,23 @@ export default function Reminders() {
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                         {activeReminders.map((rem) => {
                           const due = formatDueDate(rem.due_date)
+                          const isCompleting = completing === rem._key
                           return (
-                            <div key={rem._key} style={{
+                            <div key={rem._key} className={`reminder-item${isCompleting ? ' reminder-item-completing' : ''}`} style={{
                               padding: '12px 14px', borderRadius: 12,
                               background: due?.isOverdue ? 'rgba(220,60,60,0.04)' : 'rgba(255,255,255,0.06)',
                               borderLeft: `3px solid ${due?.isOverdue ? '#dc3c3c' : due?.isToday ? 'var(--amber)' : 'var(--text-light)'}`,
                               display: 'flex', gap: 10, alignItems: 'flex-start',
                             }}>
                               <button onClick={() => toggleDone(rem._key)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, flexShrink: 0, marginTop: 1, color: 'var(--text-light)' }}>
-                                <Square size={18} />
+                                {isCompleting ? <CheckSquare size={18} className="reminder-check-bounce" style={{ color: '#3a8a6a' }} /> : <Square size={18} />}
                               </button>
                               <div style={{ flex: 1 }}>
-                                <p style={{ margin: 0, fontSize: '0.88rem', color: 'var(--text)', lineHeight: 1.6 }}>{rem.text}</p>
+                                <p style={{
+                                  margin: 0, fontSize: '0.88rem', color: 'var(--text)', lineHeight: 1.6,
+                                  textDecoration: isCompleting ? 'line-through' : 'none',
+                                  transition: 'text-decoration 0.3s ease',
+                                }}>{rem.text}</p>
                                 {due && (
                                   <p style={{ margin: '4px 0 0', fontSize: '0.72rem', fontWeight: 600, color: due.isOverdue ? '#dc3c3c' : due.isToday ? 'var(--amber)' : 'var(--text-light)', display: 'flex', alignItems: 'center', gap: 4 }}>
                                     {due.isOverdue ? '⚠ scaduto · ' : '📅 '}{due.label}
@@ -531,6 +648,11 @@ export default function Reminders() {
                                 <CheckSquare size={16} />
                               </button>
                               <p style={{ margin: 0, fontSize: '0.82rem', color: 'var(--text-muted)', lineHeight: 1.5, textDecoration: 'line-through', flex: 1 }}>{rem.text}</p>
+                              {autoCompleted.has(rem._key) && (
+                                <span style={{ fontSize: '0.68rem', color: 'var(--amber)', display: 'flex', alignItems: 'center', gap: 3, flexShrink: 0 }}>
+                                  <Sparkles size={10} /> Auto
+                                </span>
+                              )}
                             </div>
                           ))}
                         </div>
@@ -540,7 +662,7 @@ export default function Reminders() {
                 </>
               )}
 
-              {/* ── ANSWERS panel ── */}
+              {/* ANSWERS panel */}
               {activeTab === 1 && (
                 activeAnswers.length > 0 ? (
                   <div className="glass" style={{ borderRadius: 'var(--radius-lg)', padding: '1.5rem' }}>
@@ -574,7 +696,7 @@ export default function Reminders() {
                 )
               )}
 
-              {/* ── SUGGESTIONS panel ── */}
+              {/* SUGGESTIONS panel */}
               {activeTab === 2 && (
                 activesuggestions.length > 0 ? (
                   <div className="glass" style={{ borderRadius: 'var(--radius-lg)', padding: '1.5rem' }}>

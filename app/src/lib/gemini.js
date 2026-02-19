@@ -307,7 +307,7 @@ Return JSON:
     return validated
   } catch (err) {
     console.error(`[extractDayData] Failed for ${entryDate}:`, err)
-    return { summary: '', insight: null, insights: [], substances: [], entriesHash: null }
+    return { summary: '', insight: null, insights: [], actions: [], substances: [], entriesHash: null }
   }
 }
 
@@ -433,7 +433,7 @@ Rules:
 }
 
 // ─── SMART REMINDERS (extract actionable items from entries) ─
-export async function generateReminders(entries, daySummaries) {
+export async function generateReminders(entries, daySummaries, activeReminders = []) {
   if (!entries || entries.length === 0) {
     throw new Error('No entries provided')
   }
@@ -508,8 +508,16 @@ Analyze ALL entries carefully and extract:
    - Gentle nudges for gaps (missed medication, reduced activity)
    - Cross-factor correlations ("caffeine after 3pm correlates with poor sleep entries")
 
+${activeReminders.length > 0 ? `
+ACTIVE REMINDERS — check if any were completed/resolved by the entries above:
+${activeReminders.map(r => `- [${r._key}] "${r.text}"`).join('\n')}
+
+If an entry clearly indicates a reminder has been done, resolved, or is no longer relevant, include its key in "completed_reminders".
+` : ''}
+
 Return JSON:
 {
+  "completed_reminders": ["key1"],
   "reminders": [
     {
       "text": "what needs to be done",

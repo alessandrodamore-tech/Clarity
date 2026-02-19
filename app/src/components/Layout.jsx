@@ -201,6 +201,7 @@ export default function Layout() {
 
   // Scroll to top on every route change (Home manages its own scroll-to-bottom)
   useEffect(() => {
+    if (location.pathname === '/app' || location.pathname === '/app/home') return
     window.scrollTo(0, 0)
   }, [location.pathname])
 
