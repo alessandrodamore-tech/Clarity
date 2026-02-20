@@ -114,7 +114,7 @@ body {
   -webkit-backdrop-filter: blur(16px);
   color: var(--text);
   outline: none;
-  transition: all 0.3s;
+  transition: border-color 0.2s ease, background 0.2s ease;
 }
 .glass-input:focus {
   border-color: rgba(255, 255, 255, 0.7);
@@ -134,7 +134,7 @@ body {
   -webkit-backdrop-filter: blur(12px);
   color: var(--text);
   outline: none;
-  transition: all 0.3s;
+  transition: border-color 0.2s ease, background 0.2s ease;
   resize: none;
   line-height: 1.7;
 }
@@ -155,7 +155,7 @@ body {
   font-size: 0.92rem;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.3s;
+  transition: transform 0.2s ease, background 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease;
   white-space: nowrap;
   backdrop-filter: blur(8px);
 }
@@ -631,8 +631,12 @@ body {
 .feed-card:hover {
   background: rgba(255, 255, 255, 0.35);
 }
+@media (hover: none) {
+  .feed-card:hover { background: transparent; }
+}
 .feed-card:active {
   background: rgba(255, 255, 255, 0.45);
+  transform: scale(0.99);
 }
 
 .feed-input-bar {
