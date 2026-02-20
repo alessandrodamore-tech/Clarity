@@ -48,7 +48,7 @@ function repairJSON(str) {
 }
 
 function hashEntries(entries) {
-  return entries.map(e => `${e.id}:${e.text?.slice(0, 50)}`).join('|')
+  return entries.map(e => `${e.id}:${e.text?.slice(0, 50)}`).sort().join('|')
 }
 
 // ─── CACHE HELPERS (localStorage + Supabase) ─────────────

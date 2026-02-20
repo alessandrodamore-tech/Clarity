@@ -146,14 +146,14 @@ export default function EntryDetailModal({
               <span style={{ fontSize: '0.75rem', color: '#9a9ab0', fontWeight: 600, fontFamily: 'var(--font-display)', display: 'flex', alignItems: 'center', gap: 4 }}>
                 {editingField === 'date' ? (
                   <input type="date" value={editDate} autoFocus onChange={e => setEditDate(e.target.value)} onBlur={() => setEditingField(null)}
-                    style={{ fontSize: '0.75rem', color: '#9a9ab0', fontFamily: 'var(--font-display)', fontWeight: 600, background: 'none', border: 'none', outline: 'none', padding: 0 }} />
+                    style={{ fontSize: '16px', color: '#9a9ab0', fontFamily: 'var(--font-display)', fontWeight: 600, background: 'none', border: 'none', outline: 'none', padding: 0 }} />
                 ) : (
                   <span onClick={() => setEditingField('date')} style={{ cursor: 'pointer' }}>{editDate}</span>
                 )}
                 {' · '}
                 {editingField === 'time' ? (
                   <input type="time" value={editTime} autoFocus onChange={e => setEditTime(e.target.value)} onBlur={() => setEditingField(null)}
-                    style={{ fontSize: '0.75rem', color: '#9a9ab0', fontFamily: 'var(--font-display)', fontWeight: 600, background: 'none', border: 'none', outline: 'none', padding: 0 }} />
+                    style={{ fontSize: '16px', color: '#9a9ab0', fontFamily: 'var(--font-display)', fontWeight: 600, background: 'none', border: 'none', outline: 'none', padding: 0 }} />
                 ) : (
                   <span onClick={() => setEditingField('time')} style={{ cursor: 'pointer' }}>{editTime}</span>
                 )}
@@ -217,7 +217,7 @@ export default function EntryDetailModal({
                   onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleAsk() } }}
                   placeholder="Ask anything about this entry..."
                   autoFocus
-                  style={{ flex: 1, minHeight: 40, padding: '10px 14px', fontSize: '0.85rem', borderRadius: 14 }}
+                  style={{ flex: 1, minHeight: 40, padding: '10px 14px', fontSize: '16px', borderRadius: 14 }}
                 />
                 <button
                   className="feed-send"
@@ -254,7 +254,7 @@ export default function EntryDetailModal({
           <>
             <textarea value={editText} onChange={e => setEditText(e.target.value)} style={{
               width: '100%', minHeight: 160, padding: 0, border: 'none', background: 'none', outline: 'none',
-              fontSize: '0.95rem', lineHeight: 1.75, color: '#2a2a45', fontFamily: 'inherit', resize: 'vertical', marginBottom: 20,
+              fontSize: '16px', lineHeight: 1.75, color: '#2a2a45', fontFamily: 'inherit', resize: 'vertical', marginBottom: 20,
               animation: contentAnimation, opacity: contentOpacity,
             }} />
             <div style={{

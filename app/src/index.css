@@ -22,6 +22,8 @@
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
 html { scroll-behavior: smooth; font-size: 16px; }
+/* Prevent iOS auto-zoom on focus — all inputs must be >= 16px */
+input, textarea, select { font-size: max(16px, 1em); }
 
 body {
   font-family: var(--font-body);
@@ -613,7 +615,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  padding-bottom: calc(80px + env(safe-area-inset-bottom, 0px));
+  padding-bottom: calc(140px + env(safe-area-inset-bottom, 0px));
 }
 
 .feed-card {
@@ -669,7 +671,7 @@ body {
 .feed-input-inner {
   display: flex;
   gap: 14px;
-  align-items: center;
+  align-items: flex-start;
   padding: 10px 16px;
   background: rgba(255, 255, 255, 0.6);
   backdrop-filter: blur(32px) saturate(180%);

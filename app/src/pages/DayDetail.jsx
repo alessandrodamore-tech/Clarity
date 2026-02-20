@@ -95,9 +95,9 @@ function DayActions({ dayData, dateStr, overrides, onOverridesChange }) {
       {addingNew ? (
         <div style={{ display: 'flex', gap: 4, alignItems: 'center', marginTop: 2 }}>
           <input autoFocus value={newName} onChange={e => setNewName(e.target.value)} onKeyDown={e => e.key === 'Enter' && addManual()} placeholder="Name"
-            style={{ flex: 1, fontSize: '0.72rem', padding: '5px 7px', border: '1px solid rgba(0,0,0,0.1)', borderRadius: 6, background: 'rgba(255,255,255,0.7)', outline: 'none', fontFamily: 'inherit' }} />
+            style={{ flex: 1, fontSize: '16px', padding: '5px 7px', border: '1px solid rgba(0,0,0,0.1)', borderRadius: 6, background: 'rgba(255,255,255,0.7)', outline: 'none', fontFamily: 'inherit' }} />
           <input value={newDetail} onChange={e => setNewDetail(e.target.value)} onKeyDown={e => e.key === 'Enter' && addManual()} placeholder="Detail"
-            style={{ width: 50, fontSize: '0.68rem', padding: '5px 5px', border: '1px solid rgba(0,0,0,0.1)', borderRadius: 6, background: 'rgba(255,255,255,0.7)', outline: 'none', fontFamily: 'inherit' }} />
+            style={{ width: 50, fontSize: '16px', padding: '5px 5px', border: '1px solid rgba(0,0,0,0.1)', borderRadius: 6, background: 'rgba(255,255,255,0.7)', outline: 'none', fontFamily: 'inherit' }} />
           <button onClick={addManual} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--amber)', padding: 2, fontSize: '0.8rem' }}>✓</button>
           <button onClick={() => setAddingNew(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 2 }}><X size={12} /></button>
         </div>
