@@ -113,7 +113,7 @@ user_id uuid FK → auth.users NOT NULL
 raw_text text NOT NULL
 entry_date date NOT NULL
 entry_time time NOT NULL DEFAULT '12:00'
-source text NOT NULL DEFAULT 'manual'  -- CHECK: entries_source_check
+source text NOT NULL DEFAULT 'manual'  -- CHECK: entries_source_check IN ('manual', 'import', 'notion')
 created_at timestamptz DEFAULT now()
 ```
 - RLS enabled: users see only their own entries
@@ -318,8 +318,8 @@ Re-scans all entries and finds reminders/suggestions/alerts/answers that were ov
 - [x] ~~Onboarding redesign~~ — DONE in v0.3.2 (Liquid Glass bottom sheet, English text)
 - [x] ~~Reminders tabbed UI~~ — DONE in v0.3.2 (swipe navigation, re-analyze button, due dates, browser notifications)
 - [x] ~~Thinking model JSON fix~~ — DONE in v0.3.2 (filter thought parts, extract JSON from preamble)
-- [ ] `entries_source_check` constraint only accepts 'manual' — should also accept 'import', 'notion'
-- [ ] `user_reminders` table may not exist on Supabase — run migration SQL to create it for cross-device persistence
+- [x] ~~`entries_source_check` constraint only accepts 'manual'~~ — DONE in v0.4 (constraint updated to accept 'manual', 'import', 'notion')
+- [x] ~~`user_reminders` table may not exist on Supabase~~ — DONE in v0.3 (table exists, cross-device persistence works)
 - [ ] Rate limiting for "Analyze all" — some days fail with 429
 - [ ] Push notifications for reminders (requires service worker + VAPID keys — currently browser-only via Notification API)
 
@@ -331,6 +331,7 @@ clarity/
 ├── vercel.json        ← Vercel deployment config
 ├── index.html         ← landing page (copied to app/public/landing.html for build)
 ├── supabase_migration_v0.3.sql  ← DB migration for user_reports + user_reminders
+├── supabase_migration_v0.4.sql  ← DB migration: fix entries_source_check to accept 'import', 'notion'
 ├── api/
 │   ├── gemini.js      ← serverless Gemini API proxy (hides API key)
 │   └── notion.js      ← serverless Notion API proxy (CORS bypass, actions: test/query/push/archive/update)
