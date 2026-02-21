@@ -188,7 +188,7 @@ export default function DayDetail() {
     <div className="day-detail-page" style={{ animation: 'slideUp 0.4s cubic-bezier(0.16,1,0.3,1) both' }}>
       {/* HEADER */}
       <div className="day-detail-header">
-        <button onClick={() => navigate('/app')} className="day-detail-back">
+        <button onClick={() => navigate(-1)} className="day-detail-back">
           <ArrowLeft size={18} />
         </button>
         <div style={{ flex: 1 }}>

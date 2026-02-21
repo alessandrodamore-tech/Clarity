@@ -601,39 +601,6 @@ Return JSON: {"hints": [{"text": "prompt text", "source_date": "YYYY-MM-DD or nu
   }
 }
 
-// ─── PER-ENTRY AI ACTIONS ────────────────────────────────
-export async function analyzeEntry(entry, actionType, question) {
-  if (!entry?.text) throw new Error('No entry text provided')
-
-  const userContext = getUserContext()
-  const userContextBlock = userContext
-    ? `\nUSER CONTEXT (personal background, conditions, instructions):\n${userContext}\n`
-    : ''
-
-  const entryBlock = `ENTRY (${entry.entry_date} ${entry.entry_time || ''}):\n${entry.text}`
-
-  const prompts = {
-    analyze: `You are a clinical wellness analyst. Analyze this journal entry in depth — emotional state, energy level, behaviors, cause-effect patterns, wellness signals. Write 3-5 paragraphs. Be specific, cite parts of the text.
-${userContextBlock}
-${entryBlock}
-
-Respond in the SAME LANGUAGE as the entry text.`,
-
-    ask: `You are a knowledgeable assistant. Answer the user's question in the context of their journal entry. Write 2-5 paragraphs. Cite relevant parts of the entry where useful. Be thorough and genuinely helpful.
-${userContextBlock}
-${entryBlock}
-
-USER QUESTION: ${question || ''}
-
-Respond in the SAME LANGUAGE as the question (or the entry if no clear language preference).`,
-  }
-
-  const prompt = prompts[actionType]
-  if (!prompt) throw new Error(`Unknown action type: ${actionType}`)
-
-  return await callGemini(prompt, { maxOutputTokens: 4096, temperature: 0.3, jsonMode: false, retries: 1 })
-}
-
 // ─── FIND MISSED ALERTS ──────────────────────────────────
 export async function findMissedAlerts(entries, existingAlerts) {
   if (!entries?.length) throw new Error('No entries provided')

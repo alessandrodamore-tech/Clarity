@@ -75,7 +75,7 @@ GEMINI_API_KEY=<gemini-api-key>                     # server-side only, used by 
 ### Core Libraries (src/lib/)
 | File | What it does |
 |------|-------------|
-| `gemini.js` | All AI logic: `callGemini()`, `extractDayData()`, `generateGlobalInsights()`, `generateAlerts()`, `generatePlaceholderHints()`, `analyzeEntry()`, `findMissedAlerts()`, `getUserContext()`, `loadCachedSummaries()`, `clearSummaryCache()`. Thinking model support: filters `thought` parts from response |
+| `gemini.js` | All AI logic: `callGemini()`, `extractDayData()`, `generateGlobalInsights()`, `generateAlerts()`, `generatePlaceholderHints()`, `findMissedAlerts()`, `getUserContext()`, `loadCachedSummaries()`, `clearSummaryCache()`. Thinking model support: filters `thought` parts from response |
 | `notion.js` | Notion two-way sync: `testNotionConnection()`, `pushToNotion()`, `pullFromNotion()`, `autoSyncEntry()`, `autoUpdateNotionEntry()`, `cleanupNotionDuplicates()`, credential management, sync map |
 | `store.jsx` | React context: auth state, entries CRUD, `useApp()` hook, auto-sync to Notion on addEntry + updateEntry, auto-pull from Notion on app load |
 | `supabase.js` | Supabase client init |
@@ -85,7 +85,7 @@ GEMINI_API_KEY=<gemini-api-key>                     # server-side only, used by 
 | File | What it does |
 |------|-------------|
 | `Layout.jsx` | Top bar: Settings/gear (left), "Clarity." (center), Help/? (right, triggers Liquid Glass onboarding bottom sheet). Page transitions (opacity fade). Scroll-to-top on route change. Safe area support for iPhone. Trends/Alerts in Home bottom bar |
-| `EntryDetailModal.jsx` | Read-first entry modal with AI actions (Analyze, Ask anything). Edit mode via pencil icon. Replaced EditEntryModal.jsx |
+| `EntryDetailModal.jsx` | Entry edit modal — opens directly in edit mode. Tap date/time to change. Delete with confirmation. No AI actions |
 | `EmptyState.jsx` | Reusable empty state component |
 | `ErrorBoundary.jsx` | React error boundary with refresh fallback |
 | `Onboarding.jsx` | First-time user onboarding flow |
@@ -207,12 +207,6 @@ Context-aware input hints for Home. Returns array of `{text, source_date, source
 - Clicking a hint with source scrolls to and highlights the referenced entry
 - Config: `maxOutputTokens: 4096`, `temperature: 0.6`, `retries: 1`
 
-### `analyzeEntry(entry, actionType, question)` (v0.3)
-Per-entry AI analysis. Returns **prose** (not JSON).
-- `actionType`: `'analyze'` (deep analysis) or `'ask'` (answer user question about entry)
-- Injects user context, responds in same language as entry
-- Config: `maxOutputTokens: 4096`, `temperature: 0.3`, `jsonMode: false`, `retries: 1`
-
 ### `findMissedAlerts(entries, existingAlerts)` (v0.5)
 Re-scans all entries and finds health signals that were overlooked.
 - Sends existing alert texts to AI so it doesn't repeat them
@@ -299,7 +293,7 @@ Re-scans all entries and finds health signals that were overlooked.
 
 ## Known Issues / TODO
 - [x] ~~Trends page needs visual rebuild~~ — DONE in v0.2 (AnalysisReport)
-- [x] ~~Per-entry AI actions~~ — DONE in v0.3 (EntryDetailModal: Analyze + Ask anything)
+- [x] ~~Per-entry AI actions~~ — Added in v0.3, removed in v0.5 (simplified modal to edit-only)
 - [x] ~~Deploy to Vercel~~ — DONE in v0.3 (clarity-dusky.vercel.app)
 - [x] ~~Supabase persistence for reports/reminders~~ — DONE in v0.3
 - [x] ~~Onboarding accessible anytime~~ — DONE in v0.3 (HelpCircle icon in Layout top-right)
@@ -350,7 +344,7 @@ clarity/
 │       ├── index.css      ← all styles
 │       ├── components/
 │       │   ├── Layout.jsx
-│       │   ├── EntryDetailModal.jsx  ← read-first modal with AI actions
+│       │   ├── EntryDetailModal.jsx  ← entry edit modal (direct edit, no AI)
 │       │   ├── EmptyState.jsx
 │       │   ├── ErrorBoundary.jsx
 │       │   ├── Onboarding.jsx
