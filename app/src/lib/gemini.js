@@ -1,7 +1,7 @@
 import { supabase } from './supabase'
 
 const DIRECT_API_KEY = import.meta.env.VITE_GEMINI_API_KEY
-const MODEL = 'gemini-3-pro-preview'
+const MODEL = 'gemini-3.1-pro-preview'
 const DIRECT_API_URL = DIRECT_API_KEY
   ? `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${DIRECT_API_KEY}`
   : null
@@ -165,7 +165,7 @@ async function callGemini(prompt, { maxOutputTokens = 8192, temperature = 0.1, j
 
       const data = await res.json()
       const parts = data?.candidates?.[0]?.content?.parts || []
-      // Thinking model (gemini-3-pro-preview) emits a thought part first (thought: true)
+      // Thinking model (gemini-3.1-pro-preview) emits a thought part first (thought: true)
       // followed by the actual response part — always pick the non-thought text
       const responsePart = parts.find(p => p.text && !p.thought) ?? parts.find(p => p.text) ?? {}
       const text = responsePart.text || '{}'

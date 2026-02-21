@@ -28,7 +28,7 @@ A smart mental health journal. Write freely about your day — AI extracts patte
 ## Tech Stack
 - **Frontend**: React 19 + Vite, no component library, no charting library — everything hand-built
 - **Backend**: Supabase (auth, Postgres, RLS)
-- **AI**: Google Gemini API (`gemini-3-pro-preview`) for per-day analysis + cross-day reports + health alerts + smart hints
+- **AI**: Google Gemini API (`gemini-3.1-pro-preview`) for per-day analysis + cross-day reports + health alerts + smart hints
 - **Styling**: Custom CSS with glass morphism design system (CSS variables, `className="glass"`)
 - **Deployment**: Vercel (auto-deploy from GitHub, serverless API proxy for Gemini)
 - **No TypeScript** — plain JSX
@@ -161,7 +161,7 @@ UNIQUE(user_id)
 ## AI / Gemini Details
 
 ### Model
-- **Current**: `gemini-3-pro-preview` (thinking model — needs high `maxOutputTokens` because thinking tokens consume the budget)
+- **Current**: `gemini-3.1-pro-preview` (thinking model — needs high `maxOutputTokens` because thinking tokens consume the budget)
 - **DO NOT use** `gemini-2.5-flash` — it's a thinking model that truncates JSON
 - **DO NOT add** `thinkingConfig: { thinkingBudget: 0 }` — causes 400 error
 - Use `maxOutputTokens: 4096+` for hint generation, `8192` for reports — thinking tokens can consume 200+ tokens before any output

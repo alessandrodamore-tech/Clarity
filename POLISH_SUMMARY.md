@@ -236,7 +236,7 @@ The app supports both old and new data formats:
 
 ## Technical Constraints (Preserved)
 
-✅ **Gemini Model:** `gemini-3-pro-preview`  
+✅ **Gemini Model:** `gemini-3.1-pro-preview`  
 ✅ **No `thinkingConfig`** in Gemini calls  
 ✅ **Preserved** `callGemini` and `repairJSON` functions unchanged  
 ✅ **Supabase Schema:**
