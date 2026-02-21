@@ -18,7 +18,7 @@ The app needs to be **publicly presentable as a product**, not just a personal t
 
 ### Design Philosophy
 - **Zero friction**: writing an entry should feel like texting yourself
-- **AI stays out of the way**: the Home feed is pure journaling, no AI clutter. Analysis lives in dedicated pages (Trends, DayDetail, Reminders)
+- **AI stays out of the way**: the Home feed is pure journaling, no AI clutter. Analysis lives in dedicated pages (Trends, DayDetail, Alerts)
 - **Beautiful but not flashy**: glass morphism, soft gradients, calm palette. It's a mental health app — the UI should feel safe and quiet
 - **Mobile-first**: designed as a personal diary app, used primarily from phone
 
@@ -28,7 +28,7 @@ A smart mental health journal. Write freely about your day — AI extracts patte
 ## Tech Stack
 - **Frontend**: React 19 + Vite, no component library, no charting library — everything hand-built
 - **Backend**: Supabase (auth, Postgres, RLS)
-- **AI**: Google Gemini API (`gemini-3-pro-preview`) for per-day analysis + cross-day reports + smart reminders + smart hints
+- **AI**: Google Gemini API (`gemini-3-pro-preview`) for per-day analysis + cross-day reports + health alerts + smart hints
 - **Styling**: Custom CSS with glass morphism design system (CSS variables, `className="glass"`)
 - **Deployment**: Vercel (auto-deploy from GitHub, serverless API proxy for Gemini)
 - **No TypeScript** — plain JSX
@@ -63,10 +63,10 @@ GEMINI_API_KEY=<gemini-api-key>                     # server-side only, used by 
 ### Pages (src/pages/)
 | File | What it does |
 |------|-------------|
-| `Home.jsx` | Main feed — continuous entries oldest→newest, fixed input bar at bottom (chat-style) with Trends/Reminders nav buttons flanking it, AI hint chips above input (visible while typing, with refresh button), send icon button |
+| `Home.jsx` | Main feed — continuous entries oldest→newest, fixed input bar at bottom (chat-style) with Trends/Alerts nav buttons flanking it, AI hint chips above input (visible while typing, with refresh button), send icon button |
 | `DayDetail.jsx` | Full day view: AI insight card, entries (click to edit), AI-extracted actions with manual overrides |
 | `Trends.jsx` | Orchestrator: WellnessHero (heatmap + stats), AnalysisReport (AI clinical report with disclaimer banner), DetailedStats (time distribution + day-of-week) |
-| `Reminders.jsx` | Tabbed UI (Reminders / Answers / Suggestions) with swipe navigation. Re-analyze button in header. Auto-incremental update on new entries. Due dates on reminders with browser notifications. Checkbox persistence + archive. No alerts section |
+| `Alerts.jsx` | Health intelligence feed — flat list of alerts sorted by severity, expandable cards with dismiss. Types: warning (red), medication (amber), pattern (teal), positive (green), answer (violet). Re-analyze button. Auto-incremental on new entries. Browser notifications for high-severity warning/medication alerts. Supabase persistence via `user_reminders` table |
 | `Profile.jsx` | User info + AI context textarea. Context injected into ALL Gemini calls |
 | `Import.jsx` | Import wizard: text/CSV/Notion export/paste, preview, dedup, batch insert |
 | `Settings.jsx` | Profile + AI context + Notion sync + Import link + About + Sign Out (merged Profile+Settings) |
@@ -75,7 +75,7 @@ GEMINI_API_KEY=<gemini-api-key>                     # server-side only, used by 
 ### Core Libraries (src/lib/)
 | File | What it does |
 |------|-------------|
-| `gemini.js` | All AI logic: `callGemini()`, `extractDayData()`, `generateGlobalInsights()`, `generateReminders()`, `generatePlaceholderHints()`, `analyzeEntry()`, `findMissedReminders()`, `getUserContext()`, `loadCachedSummaries()`, `clearSummaryCache()`. Thinking model support: filters `thought` parts from response |
+| `gemini.js` | All AI logic: `callGemini()`, `extractDayData()`, `generateGlobalInsights()`, `generateAlerts()`, `generatePlaceholderHints()`, `analyzeEntry()`, `findMissedAlerts()`, `getUserContext()`, `loadCachedSummaries()`, `clearSummaryCache()`. Thinking model support: filters `thought` parts from response |
 | `notion.js` | Notion two-way sync: `testNotionConnection()`, `pushToNotion()`, `pullFromNotion()`, `autoSyncEntry()`, `autoUpdateNotionEntry()`, `cleanupNotionDuplicates()`, credential management, sync map |
 | `store.jsx` | React context: auth state, entries CRUD, `useApp()` hook, auto-sync to Notion on addEntry + updateEntry, auto-pull from Notion on app load |
 | `supabase.js` | Supabase client init |
@@ -84,7 +84,7 @@ GEMINI_API_KEY=<gemini-api-key>                     # server-side only, used by 
 ### Components (src/components/)
 | File | What it does |
 |------|-------------|
-| `Layout.jsx` | Top bar: Settings/gear (left), "Clarity." (center), Help/? (right, triggers Liquid Glass onboarding bottom sheet). Page transitions (opacity fade). Scroll-to-top on route change. Safe area support for iPhone. Trends/Reminders in Home bottom bar |
+| `Layout.jsx` | Top bar: Settings/gear (left), "Clarity." (center), Help/? (right, triggers Liquid Glass onboarding bottom sheet). Page transitions (opacity fade). Scroll-to-top on route change. Safe area support for iPhone. Trends/Alerts in Home bottom bar |
 | `EntryDetailModal.jsx` | Read-first entry modal with AI actions (Analyze, Ask anything). Edit mode via pencil icon. Replaced EditEntryModal.jsx |
 | `EmptyState.jsx` | Reusable empty state component |
 | `ErrorBoundary.jsx` | React error boundary with refresh fallback |
@@ -189,15 +189,16 @@ Cross-day clinical wellness report. Returns JSON with 8 fields:
 - Config: `maxOutputTokens: 8192`, `temperature: 0.25`, `retries: 2`
 - Cache key: `clarity_global_report`
 
-### `generateReminders(entries, daySummaries)`
-Scans last 14 days, extracts 3 types of items:
-- `reminders[]`: tasks/follow-ups mentioned in entries (with `due_date` inferred from context)
-- `answers[]`: answers to questions the user wondered about (with `search_query`)
-- `suggestions[]`: proactive wellness suggestions (with `type`: positive|warning|info)
-- Each reminder has: `text`, `source_date`, `due_date`, `source_excerpt`, `priority`, `action_hint`
+### `generateAlerts(entries, daySummaries)`
+Scans last 14 days, generates health intelligence alerts:
+- Single `alerts[]` array with unified schema
+- Each alert: `text`, `type`, `severity`, `detail`, `source_dates[]`, `source_excerpt`, `search_query` (answer type only)
+- Types: `warning` (declining trends, anomalies), `medication` (adherence, timing, effects), `pattern` (correlations), `positive` (good trends), `answer` (health questions from entries)
+- Severity: `high` | `medium` | `low`
+- NO to-do items or task reminders — purely health intelligence
 - Auto-incremental update when new entries arrive, full re-analyze via header button
-- Browser notifications for due/overdue reminders (deduped via `clarity_notif_sent`)
-- Cache key: `clarity_reminders`, done state: `clarity_reminders_done`
+- Browser notifications only for `severity: 'high'` + `type: 'warning'|'medication'`
+- Cache key: `clarity_alerts`, dismissed state: `clarity_alerts_dismissed`
 
 ### `generatePlaceholderHints(recentEntries)`
 Context-aware input hints for Home. Returns array of `{text, source_date, source_time}`.
@@ -212,10 +213,10 @@ Per-entry AI analysis. Returns **prose** (not JSON).
 - Injects user context, responds in same language as entry
 - Config: `maxOutputTokens: 4096`, `temperature: 0.3`, `jsonMode: false`, `retries: 1`
 
-### `findMissedReminders(entries, existingData)` (v0.3)
-Re-scans all entries and finds reminders/suggestions/alerts/answers that were overlooked.
-- Sends existing items to AI so it doesn't repeat them
-- Returns same JSON format as `generateReminders` (only new items)
+### `findMissedAlerts(entries, existingAlerts)` (v0.5)
+Re-scans all entries and finds health signals that were overlooked.
+- Sends existing alert texts to AI so it doesn't repeat them
+- Returns same JSON format as `generateAlerts` (only new alerts)
 - Config: `maxOutputTokens: 8192`, `temperature: 0.2`, `retries: 1`
 
 ### `callGemini(prompt, options)`
@@ -236,14 +237,14 @@ Re-scans all entries and finds reminders/suggestions/alerts/answers that were ov
 - `clarity_med_overrides` — per-day action toggles/additions
 - `clarity_user_context` — user-written AI context (Profile page)
 - `clarity_global_report` — cross-day AI report cache (Trends page)
-- `clarity_reminders` — generated reminders cache
-- `clarity_reminders_hash` — entries hash for staleness detection
-- `clarity_reminders_done` — JSON array of completed reminder indices
-- `clarity_reminders_seen` — hash of last seen reminders (for badge)
+- `clarity_alerts` — generated alerts cache
+- `clarity_alerts_hash` — entries hash for staleness detection
+- `clarity_alerts_dismissed` — JSON array of dismissed alert keys
+- `clarity_alerts_seen` — timestamp of last alerts page visit (for badge)
 - `clarity_onboarding_analysis_hint_dismissed` — onboarding hint state
 - `clarity_hints` — AI-generated input hint chips cache
 - `clarity_hints_ts` — timestamp of last hint generation
-- `clarity_reminders_processed_ids` — processed entry IDs for incremental reminders
+- `clarity_alerts_processed_ids` — processed entry IDs for incremental alerts
 - `clarity_notion_creds` — Notion credentials JSON (token, databaseId, databaseName, titleProperty). Also persisted in Supabase user_metadata for cross-device
 - `clarity_notion_sync_map` — JSON map of clarity_id → notion_page_id (dedup tracker)
 - `clarity_notif_sent` — dedup tracker for browser notifications (avoids repeat notifications same session)
@@ -277,18 +278,18 @@ Re-scans all entries and finds reminders/suggestions/alerts/answers that were ov
 | `update` | PATCH page properties |
 
 ## Design Decisions
-- **Home = minimal AI** — entries, input, and AI hint chips above input (context-aware suggestions). All deep analysis lives in Trends/DayDetail/Reminders
+- **Home = minimal AI** — entries, input, and AI hint chips above input (context-aware suggestions). All deep analysis lives in Trends/DayDetail/Alerts
 - **Feed order = chat-style** — oldest at top, newest at bottom, input fixed at bottom
 - **Day separators** in feed as glass pills (Today, Yesterday, or formatted date)
-- **On-demand analysis only** — user clicks ↻ per day. Reminders auto-update incrementally on new entries + manual "Re-analyze" button for full refresh
+- **On-demand analysis only** — user clicks ↻ per day. Alerts auto-update incrementally on new entries + manual "Re-analyze" button for full refresh
 - **Single API call per day** — summary + insight + actions together
 - **Actions not "Substances"** — right column tracks everything wellness-relevant
 - **Top bar simplified** — Profile (left), Clarity. (center), Settings (right)
-- **Bottom bar** — Trends button (left), input bar (center), Reminders button (right) — liquid glass style
+- **Bottom bar** — Trends button (left), input bar (center), Alerts button (right) — liquid glass style
 - **Glass morphism** — frosted glass cards, not flat/material design
 - **User context everywhere** — Profile page context injected into all 3 AI functions
 - **Multilingual AI** — reports and reminders written in the same language as user entries
-- **Reminders** — tabbed UI (Reminders/Answers/Suggestions) with swipe navigation. Auto-incremental on new entries, "Re-analyze" button for full refresh. Due dates with browser notifications. All sections checkable
+- **Alerts** — unified health intelligence feed (no tabs). Sorted by severity→type. Expandable cards with dismiss. Browser notifications for high-severity warnings/medication alerts only. Auto-incremental on new entries, "Re-analyze" for full refresh
 - **Page transitions** — opacity fade (no transform — `transform` breaks `position: fixed` on Safari)
 - **iPhone safe areas** — `viewport-fit=cover` + `env(safe-area-inset-*)` for top bar, bottom input bar, and feed padding
 - **Notion credentials cross-device** — stored in Supabase `user_metadata`, hydrated via `getUser()` (not just JWT session which can be stale)
@@ -367,7 +368,7 @@ clarity/
 │           ├── Home.jsx
 │           ├── DayDetail.jsx
 │           ├── Trends.jsx
-│           ├── Reminders.jsx
+│           ├── Alerts.jsx
 │           ├── Profile.jsx
 │           ├── Import.jsx
 │           ├── Settings.jsx
