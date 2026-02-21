@@ -343,7 +343,7 @@ export default function Settings() {
             margin: '12px 0 0', fontSize: '0.72rem', color: 'var(--text-light)',
             textAlign: 'center',
           }}>
-            This context will be included in all AI analyses (daily, trends, reminders).
+            This context will be included in all AI analyses (daily, trends, alerts).
           </p>
         )}
       </div>

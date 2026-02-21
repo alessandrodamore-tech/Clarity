@@ -4,7 +4,7 @@ import Layout from './components/Layout'
 import Home from './pages/Home'
 import DayDetail from './pages/DayDetail'
 import Trends from './pages/Trends'
-import Reminders from './pages/Reminders'
+import Alerts from './pages/Alerts'
 import Settings from './pages/Settings'
 import Import from './pages/Import'
 import Login from './pages/Login'
@@ -37,7 +37,8 @@ export default function App() {
         <Route path="day/:date" element={<DayDetail />} />
         <Route path="insights" element={<Navigate to="/app/trends" replace />} />
         <Route path="trends" element={<Trends />} />
-        <Route path="reminders" element={<Reminders />} />
+        <Route path="alerts" element={<Alerts />} />
+        <Route path="reminders" element={<Navigate to="/app/alerts" replace />} />
         <Route path="profile" element={<Navigate to="/app/settings" replace />} />
         <Route path="factors" element={<Navigate to="/app/trends" replace />} />
         <Route path="settings" element={<Settings />} />

@@ -1,166 +1,17 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react'
 import { useNavigate, NavLink } from 'react-router-dom'
 import { useApp } from '../lib/store'
-import { BarChart3, Bell, Sparkles, ChevronDown, SendHorizontal, RefreshCw, Square, CheckSquare } from 'lucide-react'
+import { BarChart3, Bell, Sparkles, ChevronDown, SendHorizontal, RefreshCw } from 'lucide-react'
 import EntryDetailModal from '../components/EntryDetailModal'
 import { generatePlaceholderHints } from '../lib/gemini'
-import { stableKey } from '../lib/utils'
 
 function nowDate() { return new Date().toISOString().slice(0, 10) }
 function nowTime() { return new Date().toTimeString().slice(0, 5) }
 
-function HomeReminders() {
-  const navigate = useNavigate()
-  const [reminders, setReminders] = useState([])
-  const [doneSet, setDoneSet] = useState(() => {
-    try { return new Set(JSON.parse(localStorage.getItem('clarity_reminders_done') || '[]')) } catch { return new Set() }
-  })
-  const [completing, setCompleting] = useState(null)
-
-  useEffect(() => {
-    try {
-      const cached = JSON.parse(localStorage.getItem('clarity_reminders') || 'null')
-      if (!cached?.reminders?.length) return
-
-      const today = new Date().toISOString().slice(0, 10)
-      const priorityRank = { high: 0, medium: 1, low: 2 }
-      const keyed = cached.reminders
-        .map(r => ({ ...r, _key: stableKey(r.text, r.source_date, 'rem') }))
-
-      // Smart sort: overdue → today → high priority → upcoming → rest
-      const sorted = keyed.sort((a, b) => {
-        function cat(r) {
-          const d = r.due_date || ''
-          const p = priorityRank[r.priority] ?? 3
-          if (d && d < today) return 0
-          if (d && d === today) return 1
-          if (!d && p === 0) return 2
-          if (d && d > today) return 3
-          return 4 + p
-        }
-        const ca = cat(a), cb = cat(b)
-        if (ca !== cb) return ca - cb
-        return (a.due_date || '').localeCompare(b.due_date || '')
-      })
-
-      setReminders(sorted)
-    } catch {}
-  }, [])
-
-  const toggleDone = (key) => {
-    if (doneSet.has(key)) return
-    setCompleting(key)
-    setTimeout(() => {
-      setDoneSet(prev => {
-        const next = new Set(prev)
-        next.add(key)
-        try { localStorage.setItem('clarity_reminders_done', JSON.stringify([...next])) } catch {}
-        return next
-      })
-      setCompleting(null)
-    }, 400)
-  }
-
-  const active = reminders.filter(r => !doneSet.has(r._key) && completing !== r._key)
-  const visible = active.slice(0, 4)
-
-  if (visible.length === 0) return null
-
-  const today = new Date().toISOString().slice(0, 10)
-
-  return (
-    <div className="glass" style={{
-      margin: '12px 0 4px',
-      borderRadius: 'var(--radius)',
-      padding: '16px 18px',
-      animation: 'slideUp 0.4s cubic-bezier(0.16,1,0.3,1) both',
-    }}>
-      {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-          <Bell size={14} style={{ color: 'var(--amber)' }} />
-          <span style={{
-            fontSize: '0.7rem', fontWeight: 700, fontFamily: 'var(--font-display)',
-            color: 'var(--text-light)', textTransform: 'uppercase', letterSpacing: '0.06em',
-          }}>
-            Reminders
-          </span>
-        </div>
-        <button onClick={() => navigate('/app/reminders')} style={{
-          background: 'none', border: 'none', cursor: 'pointer',
-          color: 'var(--amber)', fontSize: '0.72rem', fontWeight: 600,
-          fontFamily: 'var(--font-display)', padding: 0,
-        }}>
-          Vedi tutti →
-        </button>
-      </div>
-
-      {/* Reminder list */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        {visible.map(r => {
-          const isOverdue = r.due_date && r.due_date < today
-          const isToday = r.due_date && r.due_date === today
-          const isCompleting = completing === r._key
-          return (
-            <div
-              key={r._key}
-              className={`reminder-item${isCompleting ? ' reminder-item-completing' : ''}`}
-              style={{
-                display: 'flex', gap: 10, alignItems: 'flex-start',
-                padding: '8px 10px', borderRadius: 10,
-                background: isOverdue ? 'rgba(220,60,60,0.04)' : 'transparent',
-                borderLeft: `2px solid ${isOverdue ? '#dc3c3c' : isToday ? 'var(--amber)' : 'rgba(255,255,255,0.15)'}`,
-              }}
-            >
-              <button
-                onClick={(e) => { e.stopPropagation(); toggleDone(r._key) }}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, flexShrink: 0, marginTop: 1, color: 'var(--text-light)' }}
-              >
-                {isCompleting
-                  ? <CheckSquare size={16} className="reminder-check-bounce" style={{ color: '#3a8a6a' }} />
-                  : <Square size={16} />
-                }
-              </button>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <p style={{
-                  margin: 0, fontSize: '0.82rem', color: 'var(--text)', lineHeight: 1.5,
-                  textDecoration: isCompleting ? 'line-through' : 'none',
-                  overflow: 'hidden', textOverflow: 'ellipsis',
-                  display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
-                }}>
-                  {r.text}
-                </p>
-                {(isOverdue || isToday) && (
-                  <span style={{
-                    fontSize: '0.65rem', fontWeight: 600, marginTop: 2, display: 'inline-block',
-                    color: isOverdue ? '#dc3c3c' : 'var(--amber)',
-                  }}>
-                    {isOverdue ? 'scaduto' : 'oggi'}
-                  </span>
-                )}
-              </div>
-            </div>
-          )
-        })}
-      </div>
-
-      {active.length > 4 && (
-        <button onClick={() => navigate('/app/reminders')} style={{
-          background: 'none', border: 'none', cursor: 'pointer', width: '100%',
-          color: 'var(--text-light)', fontSize: '0.72rem', fontWeight: 600,
-          fontFamily: 'var(--font-display)', padding: '8px 0 0', textAlign: 'center',
-        }}>
-          +{active.length - 4} altri
-        </button>
-      )}
-    </div>
-  )
-}
-
-function useRemindersBadge(entries) {
+function useAlertsBadge(entries) {
   if (!entries?.length) return false
   try {
-    const storedHash = localStorage.getItem('clarity_reminders_hash')
+    const storedHash = localStorage.getItem('clarity_alerts_hash') || localStorage.getItem('clarity_reminders_hash')
     if (!storedHash) return false
     const cutoff = new Date()
     cutoff.setDate(cutoff.getDate() - 14)
@@ -189,7 +40,7 @@ function formatDatePill(dateStr) {
 export default function Home() {
   const navigate = useNavigate()
   const { user, entries, entriesLoading, addEntry, updateEntry, deleteEntry } = useApp()
-  const showRemindersBadge = useRemindersBadge(entries)
+  const showAlertsBadge = useAlertsBadge(entries)
   const [text, setText] = useState('')
   const [time, setTime] = useState(nowTime())
   const [saving, setSaving] = useState(false)
@@ -432,9 +283,6 @@ export default function Home() {
       {/* Entries with day separators */}
       {renderEntries()}
 
-      {/* Reminders section — after last entry */}
-      {!entriesLoading && entries.length > 0 && <HomeReminders />}
-
       {/* Loading */}
       {entriesLoading && (
         <p className="feed-loading">Loading...</p>
@@ -553,7 +401,7 @@ export default function Home() {
           </div>
         )}
 
-        {/* Bottom row: Trends — Input — Reminders */}
+        {/* Bottom row: Trends — Input — Alerts */}
         <div className="bottom-bar-row">
           <NavLink to="/app/trends" className="bottom-nav-btn glass" title="Trends">
             <BarChart3 size={22} />
@@ -586,9 +434,9 @@ export default function Home() {
             </div>
           </div>
 
-          <NavLink to="/app/reminders" className="bottom-nav-btn glass" title="Reminders" style={{ position: 'relative' }}>
+          <NavLink to="/app/alerts" className="bottom-nav-btn glass" title="Alerts" style={{ position: 'relative' }}>
             <Bell size={22} />
-            {showRemindersBadge && (
+            {showAlertsBadge && (
               <span style={{
                 position: 'absolute', top: 8, right: 8,
                 width: 8, height: 8, borderRadius: '50%',

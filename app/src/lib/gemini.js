@@ -432,8 +432,8 @@ Rules:
   return await callGemini(prompt, { maxOutputTokens: 8192, temperature: 0.25, retries: 2 })
 }
 
-// ─── SMART REMINDERS (extract actionable items from entries) ─
-export async function generateReminders(entries, daySummaries, activeReminders = []) {
+// ─── SMART ALERTS (health intelligence from entries) ─────
+export async function generateAlerts(entries, daySummaries) {
   if (!entries || entries.length === 0) {
     throw new Error('No entries provided')
   }
@@ -474,7 +474,7 @@ export async function generateReminders(entries, daySummaries, activeReminders =
     ? `\nUSER CONTEXT (personal background, conditions, instructions):\n${userContext}\n`
     : ''
 
-  const prompt = `You are a smart personal assistant analyzing journal entries to extract actionable items, answer questions, provide suggestions, and flag health alerts. You have deep knowledge and can provide genuinely useful, specific information.
+  const prompt = `You are a clinical health intelligence system analyzing personal journal entries to detect health-relevant signals, patterns, and insights. Your job is NOT to create to-do lists — it's to surface health intelligence that helps the user understand their wellbeing.
 ${userContextBlock}
 CRITICAL: Write EVERYTHING in the SAME LANGUAGE as the entries below. Here is a sample: "${sampleText.slice(0, 200)}"
 
@@ -485,73 +485,56 @@ ${entriesText}
 
 ${summariesText ? `DAY SUMMARIES:\n${summariesText}` : ''}
 
-Analyze ALL entries carefully and extract:
+Analyze ALL entries and generate health alerts. Each alert is a signal about the user's wellbeing. Types:
 
-1. **reminders**: Things the person mentioned needing to do, check, remember, buy, call, etc. Look for:
-   - Explicit: "devo", "ricordarmi", "non dimenticare", "I need to", "I should", "domani devo", "controllare", "verificare", "comprare"
-   - Implicit: mentioned plans, appointments, deadlines, things to research
-   - Recurring: things they do regularly but might have forgotten recently
-   For each reminder, if there's a concrete action the person can take (a search query, a link type, a specific step), include it in the "action_hint" field.
+- **warning**: Declining trends, anomalies, concerning symptoms, missed medications, sleep disruption, worsening patterns. These are things the user should pay attention to.
+- **medication**: Medication adherence observations, timing patterns, side effects, interactions, missed doses, effectiveness notes.
+- **pattern**: Observed correlations — exercise→mood, caffeine→sleep, social→energy, time-of-day effects. Cross-factor insights with evidence.
+- **positive**: Reinforcement of good trends, streaks, improvements, healthy habits being maintained. Celebrate what's working.
+- **answer**: If the user wondered about something, asked themselves a question, or expressed uncertainty about health topics — provide a genuinely useful, detailed answer.
 
-2. **answers**: If the person wrote about wondering something, wanting to look something up, or asking themselves a question ("mi chiedo se...", "devo controllare...", "non so se...", "vorrei sapere..."):
-   - Provide a DETAILED, genuinely useful answer (3-5 sentences)
-   - Use your knowledge to give real information, not generic platitudes
-   - If the question is about health/medication, cite general medical knowledge
-   - If it's about a practical topic, give concrete steps
-   - Include a "search_query" field with a Google search query the person could use to learn more
+For EVERY alert:
+- **text**: A clear 1-sentence headline of the signal
+- **type**: warning|medication|pattern|positive|answer
+- **severity**: high (needs attention now), medium (worth noting), low (informational)
+- **detail**: 2-4 sentences explaining the signal with specific dates and evidence from entries
+- **source_dates**: Array of relevant entry dates ["YYYY-MM-DD"]
+- **source_excerpt**: Brief quote from an entry that illustrates this signal
+- **search_query**: Only for type=answer — a Google search query for more info
 
-3. **suggestions**: Proactive, data-driven tips. Be SPECIFIC:
-   - Reference actual dates and entries ("On Feb 12 you felt great after...")
-   - Quantify patterns ("3 out of 5 days with exercise showed better mood")
-   - Give actionable next steps, not vague advice
-   - Positive reinforcement for good patterns
-   - Gentle nudges for gaps (missed medication, reduced activity)
-   - Cross-factor correlations ("caffeine after 3pm correlates with poor sleep entries")
+DO NOT include:
+- To-do items, tasks, things to buy/call/schedule
+- Generic wellness advice not grounded in the user's data
+- Anything that reads like a reminder or checklist item
 
-${activeReminders.length > 0 ? `
-ACTIVE REMINDERS — check if any were completed/resolved by the entries above:
-${activeReminders.map(r => `- [${r._key}] "${r.text}"`).join('\n')}
-
-If an entry clearly indicates a reminder has been done, resolved, or is no longer relevant, include its key in "completed_reminders".
-` : ''}
+DO include:
+- Every health-relevant signal you can find in the data
+- Specific dates, quantities, and evidence
+- Cross-day patterns and correlations
+- Both positive and concerning signals
+- Medication tracking observations
 
 Return JSON:
 {
-  "completed_reminders": ["key1"],
-  "reminders": [
+  "alerts": [
     {
-      "text": "what needs to be done",
-      "source_date": "YYYY-MM-DD",
-      "due_date": "YYYY-MM-DD or null — infer from context (e.g. 'entro venerdì', 'domani', 'questo weekend', specific dates mentioned). null if no deadline implied.",
-      "source_excerpt": "brief quote from the entry that triggered this",
-      "priority": "high|medium|low",
-      "action_hint": "optional: concrete next step, search query, or useful info to help complete this task"
-    }
-  ],
-  "answers": [
-    {
-      "question": "what the person was wondering about",
-      "answer": "detailed, genuinely useful answer (3-5 sentences with real information)",
-      "source_date": "YYYY-MM-DD",
-      "search_query": "optional Google search query for more info"
-    }
-  ],
-  "suggestions": [
-    {
-      "text": "specific, data-driven suggestion referencing dates and patterns",
-      "type": "positive|warning|info",
-      "based_on": "evidence from the entries (cite dates)"
+      "text": "Headline of the alert (1 sentence)",
+      "type": "warning|pattern|positive|answer|medication",
+      "severity": "high|medium|low",
+      "detail": "Extended explanation with dates and evidence (2-4 sentences)",
+      "source_dates": ["YYYY-MM-DD"],
+      "source_excerpt": "Quote from entry",
+      "search_query": "Only for type=answer"
     }
   ]
 }
 
 Rules:
-- Only include REAL reminders found in the text — don't invent tasks
-- For answers, provide GENUINELY useful information with real knowledge — no generic advice
-- Suggestions must cite specific dates and data from entries
-- Each section can be empty [] if nothing relevant is found — don't force items
-- Be thorough — scan EVERY entry for potential reminders and questions
-- action_hint and search_query should be practical and immediately useful`
+- Ground every alert in actual entry data — cite dates and quotes
+- Severity: high = declining trends, missed critical meds, concerning symptoms; medium = notable patterns, minor concerns; low = informational, positive reinforcement
+- Aim for 5-12 alerts covering different aspects of the user's health data
+- Be thorough — scan EVERY entry for health signals
+- DO NOT generate to-do items or task reminders`
 
   return await callGemini(prompt, { maxOutputTokens: 8192, temperature: 0.2, retries: 2 })
 }
@@ -582,9 +565,11 @@ export async function generatePlaceholderHints(recentEntries) {
 
 Mix these types:
 - Questions about how they feel after something recent (medications, activities, events)
-- Reminders to track something useful (sleep quality, energy level, mood shift)
-- Follow-ups on recent context (plans mentioned, recurring patterns, goals)
+- Prompts to track something health-relevant (sleep quality, energy level, mood shift)
+- Follow-ups on recent context (recurring patterns, goals, health observations)
 - Time-relevant prompts (morning→sleep/energy, afternoon→focus/mood, evening→reflection/gratitude)
+
+DO NOT suggest to-do items, tasks, or reminder-style prompts ("did you call X?", "remember to Y").
 
 Rules:
 - SAME LANGUAGE as the entries
@@ -649,8 +634,8 @@ Respond in the SAME LANGUAGE as the question (or the entry if no clear language 
   return await callGemini(prompt, { maxOutputTokens: 4096, temperature: 0.3, jsonMode: false, retries: 1 })
 }
 
-// ─── FIND MISSED REMINDERS ───────────────────────────────
-export async function findMissedReminders(entries, existingData) {
+// ─── FIND MISSED ALERTS ──────────────────────────────────
+export async function findMissedAlerts(entries, existingAlerts) {
   if (!entries?.length) throw new Error('No entries provided')
 
   const today = new Date()
@@ -668,10 +653,7 @@ export async function findMissedReminders(entries, existingData) {
     .map(e => `[${e.entry_date} ${e.entry_time || ''}] ${e.text}`)
     .join('\n')
 
-  const existingReminders = (existingData?.reminders || []).map(r => r.text).join('\n- ')
-  const existingSuggestions = (existingData?.suggestions || []).map(s => s.text).join('\n- ')
-  const existingAlerts = (existingData?.alerts || []).map(a => a.title).join('\n- ')
-  const existingAnswers = (existingData?.answers || []).map(a => a.question).join('\n- ')
+  const existingTexts = (existingAlerts || []).map(a => a.text).join('\n- ')
 
   const sampleText = recentEntries.slice(0, 5).map(e => e.text).join(' ')
 
@@ -680,7 +662,7 @@ export async function findMissedReminders(entries, existingData) {
     ? `\nUSER CONTEXT:\n${userContext}\n`
     : ''
 
-  const prompt = `You are a meticulous personal assistant. The user already has a list of reminders, suggestions, answers and alerts extracted from their journal. They believe something is MISSING. Your job is to carefully re-read every entry and find items that were overlooked.
+  const prompt = `You are a meticulous health intelligence analyst. The user already has a list of health alerts extracted from their journal. They believe something is MISSING. Re-read every entry carefully and find health signals that were overlooked.
 ${userContextBlock}
 CRITICAL: Write in the SAME LANGUAGE as the entries. Sample: "${sampleText.slice(0, 200)}"
 
@@ -689,31 +671,38 @@ TODAY: ${today.toISOString().slice(0, 10)}
 ENTRIES (last 14 days):
 ${entriesText}
 
-ALREADY EXTRACTED (do NOT repeat these):
-${existingReminders ? `Reminders:\n- ${existingReminders}` : 'Reminders: (none)'}
-${existingSuggestions ? `Suggestions:\n- ${existingSuggestions}` : 'Suggestions: (none)'}
-${existingAlerts ? `Alerts:\n- ${existingAlerts}` : 'Alerts: (none)'}
-${existingAnswers ? `Answers:\n- ${existingAnswers}` : 'Answers: (none)'}
+EXISTING ALERTS (do NOT repeat these):
+${existingTexts ? `- ${existingTexts}` : '(none)'}
 
-Find ONLY what's missing. Look very carefully for:
-- Implicit tasks ("dovrei", "bisognerebbe", "sarebbe bene", "prima o poi")
-- Mentioned appointments, deadlines, follow-ups that weren't captured
-- Questions the user asked themselves that went unanswered
-- Health patterns or concerns not flagged
-- Practical suggestions the existing list missed
+Find ONLY missed health signals. Look for:
+- Mood or energy patterns not flagged
+- Medication observations (timing, effects, missed doses)
+- Correlations between activities and wellbeing
+- Health concerns mentioned but not captured
+- Questions about health the user asked themselves
+- Positive trends worth reinforcing
 
-Return JSON with ONLY new items (empty [] sections are fine if nothing was missed):
+DO NOT include to-do items, tasks, or things to buy/call/schedule.
+
+Return JSON:
 {
-  "reminders": [{ "text": "string", "source_date": "YYYY-MM-DD", "source_excerpt": "brief quote", "priority": "high|medium|low", "action_hint": "optional" }],
-  "answers": [{ "question": "string", "answer": "detailed answer", "source_date": "YYYY-MM-DD", "search_query": "optional" }],
-  "suggestions": [{ "text": "string", "type": "positive|warning|info", "based_on": "evidence" }],
-  "alerts": [{ "title": "string", "detail": "string", "severity": "high|medium|low" }]
+  "alerts": [
+    {
+      "text": "Headline (1 sentence)",
+      "type": "warning|pattern|positive|answer|medication",
+      "severity": "high|medium|low",
+      "detail": "2-4 sentences with dates and evidence",
+      "source_dates": ["YYYY-MM-DD"],
+      "source_excerpt": "Quote from entry",
+      "search_query": "Only for type=answer"
+    }
+  ]
 }
 
 Rules:
-- NEVER repeat items already in the existing list
-- Only include genuinely missed items — if nothing was missed, return all empty arrays
-- Be thorough: re-read every single entry word by word`
+- NEVER repeat existing alerts
+- Only include genuinely missed signals — empty [] is fine
+- Ground every alert in actual entry data`
 
   return await callGemini(prompt, { maxOutputTokens: 8192, temperature: 0.2, retries: 1 })
 }

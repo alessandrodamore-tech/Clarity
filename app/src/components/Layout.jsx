@@ -27,8 +27,8 @@ function OnboardingOverlay({ onClose }) {
     },
     {
       icon: Bell,
-      title: 'Smart Reminders',
-      detail: 'Tap the bell icon — AI automatically extracts tasks, alerts, and suggestions from your entries, with notifications when they\'re due.',
+      title: 'Smart Alerts',
+      detail: 'Tap the bell icon — AI detects health patterns, medication effects, mood trends, and wellness signals from your entries.',
       color: '#dc3c3c',
       bg: 'rgba(220,60,60,0.10)',
     },
