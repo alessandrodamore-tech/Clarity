@@ -429,7 +429,7 @@ export default function Home() {
           </NavLink>
 
           <div className="feed-input-inner" style={{ opacity: saving ? 0.6 : 1, flex: 1 }}>
-            <span className="feed-time" style={{ fontSize: '0.8rem', paddingTop: '3px', flexShrink: 0 }}>{time}</span>
+            <span className="feed-time" style={{ fontSize: '0.8rem', alignSelf: 'center', flexShrink: 0 }}>{time}</span>
             <div className="feed-card-body" style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
               <textarea
                 className="feed-input"
