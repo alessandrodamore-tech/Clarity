@@ -615,7 +615,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  padding-bottom: calc(130px + env(safe-area-inset-bottom, 0px));
+  padding-bottom: calc(90px + env(safe-area-inset-bottom, 0px));
 }
 
 .feed-card {
