@@ -11,33 +11,25 @@ export function AppProvider({ children }) {
   const [entriesLoading, setEntriesLoading] = useState(false)
   const [entriesError, setEntriesError] = useState(null)
 
-  // Auth — initialize once, set user only after fresh data is ready
+  // Auth
   useEffect(() => {
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       const sessionUser = session?.user ?? null
-
+      setUser(sessionUser)   // fast: unblocks the app immediately
+      setLoading(false)
       if (sessionUser) {
-        // Load Notion creds from cached session first (fast)
         loadNotionCredentialsFromUser(sessionUser)
         loadNotionSyncMapFromUser(sessionUser)
-
-        // Fetch fresh user metadata (has up-to-date user_metadata like ai_context)
+        // Background: refresh user metadata (ai_context etc.) without blocking
         try {
           const { data } = await supabase.auth.getUser()
           if (data?.user) {
+            setUser(data.user) // same user.id → fetchEntries won't re-run (depends on id only)
             loadNotionCredentialsFromUser(data.user)
             loadNotionSyncMapFromUser(data.user)
-            setUser(data.user) // set user ONCE with fresh data → triggers fetchEntries once
-          } else {
-            setUser(sessionUser) // fallback
           }
-        } catch {
-          setUser(sessionUser) // fallback on network error
-        }
-      } else {
-        setUser(null)
+        } catch {}
       }
-      setLoading(false)
     })
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
@@ -84,7 +76,8 @@ export function AppProvider({ children }) {
       })))
     }
     setEntriesLoading(false)
-  }, [user])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]) // depend only on user ID — metadata changes (setUser refresh) won't re-trigger
 
   useEffect(() => { fetchEntries() }, [fetchEntries])
 
