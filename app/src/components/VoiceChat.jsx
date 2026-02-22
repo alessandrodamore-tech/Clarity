@@ -162,14 +162,15 @@ export default function VoiceChat({
 
       // Detect language from browser locale
       const lang = navigator.language?.startsWith('it') ? 'Italian' : 'English'
-      const firstMsg = lang === 'Italian' ? 'Di\' pure, ti ascolto.' : 'Go ahead, I\'m listening.'
+      const firstMsg = lang === 'Italian' ? "Di' pure, ti ascolto." : "Go ahead, I'm listening."
 
       await vapi.start(assistantId, {
+        // firstMessage as direct override (not variableValue — that field doesn't support variables)
+        firstMessage: firstMsg,
         variableValues: {
           userContext: userContext || '',
           hints: hintsText,
           language: lang,
-          firstMessage: firstMsg,
         },
       })
     } catch (err) {
