@@ -1,6 +1,8 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import basicSsl from '@vitejs/plugin-basic-ssl'
+import fs from 'fs'
+import path from 'path'
 
 // Dev middleware that emulates Vercel serverless /api/notion
 function notionProxy() {
@@ -85,4 +87,60 @@ function notionProxy() {
   }
 }
 
-export default defineConfig({ plugins: [react(), basicSsl(), notionProxy()] })
+// ─── Plugin: inject build version into dist/sw.js ────────────────────────────
+// Every Vite build gets a unique cache name like "clarity-20250222-185500".
+// This invalidates stale app-shell caches on all iOS/Android clients after deploy.
+function swVersionInject() {
+  const buildTs = new Date().toISOString().replace(/[-:T.Z]/g, '').slice(0, 15)
+  const buildVersion = `clarity-${buildTs}`
+  const PLACEHOLDER_RE = /typeof __SW_CACHE_VERSION__ !== 'undefined'\s*\?\s*__SW_CACHE_VERSION__\s*:\s*`clarity-dev-\$\{Date\.now\(\)\}`/
+
+  return {
+    name: 'sw-version-inject',
+    // After Rollup writes everything to disk, patch dist/sw.js
+    closeBundle() {
+      const distSw = path.resolve('dist/sw.js')
+      if (!fs.existsSync(distSw)) return
+      const content = fs.readFileSync(distSw, 'utf8')
+      const replaced = content.replace(PLACEHOLDER_RE, `'${buildVersion}'`)
+      if (replaced !== content) {
+        fs.writeFileSync(distSw, replaced)
+        console.log(`\n[sw-version-inject] ✅ Cache version injected: ${buildVersion}\n`)
+      } else {
+        console.warn('[sw-version-inject] ⚠️  Placeholder not found in dist/sw.js — version NOT injected')
+      }
+    },
+  }
+}
+
+export default defineConfig({
+  plugins: [react(), basicSsl(), notionProxy(), swVersionInject()],
+  build: {
+    // Raise warning threshold — we're splitting intentionally
+    chunkSizeWarningLimit: 400,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          // React core — tiny, cached aggressively
+          if (id.includes('node_modules/react/') || id.includes('node_modules/react-dom/') || id.includes('node_modules/scheduler/')) {
+            return 'react-vendor'
+          }
+          // React Router
+          if (id.includes('node_modules/react-router') || id.includes('node_modules/@remix-run/')) {
+            return 'router-vendor'
+          }
+          // Supabase — large (~300 kB), only needed after auth check
+          if (id.includes('node_modules/@supabase/')) {
+            return 'supabase-vendor'
+          }
+          // Lucide icons — tree-shakeable but often bundled together
+          if (id.includes('node_modules/lucide-react/')) {
+            return 'lucide-vendor'
+          }
+          // @vapi-ai/web is already in its own lazy chunk via VoiceChat dynamic import
+          // Gemini calls are in gemini.js which is page-level — no extra split needed
+        },
+      },
+    },
+  },
+})

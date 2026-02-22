@@ -2,6 +2,35 @@ import React, { useState, useRef, useEffect } from 'react'
 import Vapi from '@vapi-ai/web'
 import { generateAnnotationFromVoiceChat } from '../lib/gemini'
 
+// ─── iOS Safari / feature detection helpers ───────────────────────────────────
+
+/** True on iOS Safari (includes Chrome/Firefox on iOS which use WebKit) */
+const isIOS = () =>
+  /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+  (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+
+/** True if the browser supports getUserMedia at all */
+const hasMediaDevices = () =>
+  !!(navigator.mediaDevices && typeof navigator.mediaDevices.getUserMedia === 'function')
+
+/**
+ * On iOS Safari, WebRTC / getUserMedia can fail with AbortError if the audio
+ * session hasn't been activated yet. Calling getUserMedia eagerly from a button
+ * tap (synchronous user gesture chain) is the most reliable approach.
+ * This utility pre-warms the audio session and releases it immediately.
+ * Must be called directly from a click handler — NOT after an await.
+ */
+async function prewarmAudioSession() {
+  if (!hasMediaDevices()) return
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+    // Release immediately — we only needed the permission prompt & session init
+    stream.getTracks().forEach(t => t.stop())
+  } catch {
+    // Ignore — Vapi will handle permission errors with its own error event
+  }
+}
+
 // ─── Icona waveform (bottone) ─────────────────────────────
 const VoiceWaveIcon = ({ animated = false }) => (
   <svg width="20" height="16" viewBox="0 0 20 16" fill="currentColor" style={{ display: 'block' }}>
@@ -134,7 +163,20 @@ export default function VoiceChat({
     vapi.on('error', (err) => {
       if (callEndedNaturally.current) return
       console.error('[VoiceChat] error:', err)
-      setError('Connection error. Try again.')
+
+      // Classify error for better UX, especially on iOS Safari
+      const msg = err?.message || String(err)
+      let userMsg = 'Connection error. Try again.'
+      if (msg.toLowerCase().includes('abort')) {
+        userMsg = isIOS()
+          ? 'Audio session interrupted. Close other apps using the mic and try again.'
+          : 'Audio connection aborted. Please try again.'
+      } else if (msg.toLowerCase().includes('permission') || msg.toLowerCase().includes('denied') || msg.toLowerCase().includes('notallowed')) {
+        userMsg = 'Microphone permission denied. Please allow access in your browser settings.'
+      } else if (msg.toLowerCase().includes('network') || msg.toLowerCase().includes('ice')) {
+        userMsg = 'Network error. Check your connection and try again.'
+      }
+      setError(userMsg)
       setStatus('idle')
     })
 
@@ -148,13 +190,33 @@ export default function VoiceChat({
       setError('Vapi not configured.')
       return
     }
+
+    // ── iOS Safari: feature detection ─────────────────────────
+    if (!hasMediaDevices()) {
+      setError(
+        isIOS()
+          ? 'Microphone not available. Open Clarity in Safari (not an in-app browser) and allow microphone access in Settings → Safari → Microphone.'
+          : 'Microphone access is not supported in this browser.'
+      )
+      return
+    }
+
     setShowModal(true)
     setModalClosing(false)
     setMessages([])
     setError(null)
+    setStatus('connecting')
 
     try {
-      setStatus('connecting')
+      // ── iOS Safari: pre-warm the audio session ────────────────
+      // On iOS, getUserMedia must be triggered directly from a user gesture.
+      // Calling it here (still in the synchronous click-event microtask chain)
+      // activates the audio session before Daily/Vapi tries to claim it,
+      // preventing AbortError: "The operation was aborted".
+      if (isIOS()) {
+        await prewarmAudioSession()
+      }
+
       const vapi = getVapi()
       const hintsText = hints.length > 0
         ? hints.slice(0, 5).map(h => `- ${h.text || h}`).join('\n')
@@ -175,7 +237,26 @@ export default function VoiceChat({
       })
     } catch (err) {
       console.error('[VoiceChat] Failed to start:', err)
-      setError('Could not start. Check microphone permissions.')
+
+      // ── iOS-specific error classification ─────────────────────
+      const isAbort = err?.name === 'AbortError' || err?.message?.includes('abort')
+      const isPermission = err?.name === 'NotAllowedError' || err?.name === 'PermissionDeniedError'
+      const isNotFound = err?.name === 'NotFoundError' || err?.name === 'DevicesNotFoundError'
+
+      let msg = 'Could not start voice chat. Please try again.'
+      if (isPermission) {
+        msg = isIOS()
+          ? 'Microphone blocked. Go to Settings → Safari → Microphone and allow access for this site.'
+          : 'Microphone permission denied. Please allow access and try again.'
+      } else if (isNotFound) {
+        msg = 'No microphone found on this device.'
+      } else if (isAbort) {
+        msg = isIOS()
+          ? 'Audio session interrupted (iOS). Close other apps using the microphone and try again.'
+          : 'Audio connection aborted. Please try again.'
+      }
+
+      setError(msg)
       setStatus('idle')
     }
   }

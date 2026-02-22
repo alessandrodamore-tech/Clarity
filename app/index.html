@@ -7,9 +7,23 @@
     <meta name="theme-color" content="#2a2a45" />
     <meta name="description" content="AI-powered mental health journaling" />
     <meta name="mobile-web-app-capable" content="yes" />
+    <!-- iOS PWA: required for "Add to Home Screen" standalone mode -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Clarity" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <link rel="manifest" href="/manifest.json" />
+    <!-- NOTE: iOS ignores SVG for apple-touch-icon; add a 180x180 PNG when available -->
     <link rel="apple-touch-icon" href="/clarity.svg" />
+    <link rel="manifest" href="/manifest.json" />
+
+    <!-- Preconnect to known API domains for faster cold starts -->
+    <!-- Gemini API (direct key path) -->
+    <link rel="preconnect" href="https://generativelanguage.googleapis.com" crossorigin />
+    <!-- Vapi voice AI -->
+    <link rel="preconnect" href="https://api.vapi.ai" crossorigin />
+    <!-- Supabase CDN / realtime (generic; main project URL is injected at build time in main.jsx) -->
+    <link rel="dns-prefetch" href="https://supabase.co" />
+    <link rel="dns-prefetch" href="https://supabase.in" />
+
     <title>Clarity</title>
   </head>
   <body>

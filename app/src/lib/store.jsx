@@ -4,23 +4,90 @@ import { autoSyncEntry, autoUpdateNotionEntry, getNotionCredentials, pullFromNot
 
 const AppContext = createContext(null)
 
+// ─── STARTUP OPTIMIZATIONS ───────────────────────────────────────────────────
+
+// Safety timeout for getSession() — on iPhone Safari with slow/no network,
+// getSession() can hang indefinitely if it needs to refresh an expired token.
+// After this many ms, we stop waiting and show the login screen.
+const GETSESSION_TIMEOUT_MS = 5000
+
+/**
+ * Fast path: reads the Supabase session directly from localStorage without
+ * making any network request. Returns the stored user object if a valid,
+ * non-expired session exists (with >60s to spare), otherwise null.
+ *
+ * This lets returning users skip the "Loading..." screen entirely.
+ * getSession() still runs in the background to confirm/refresh the session.
+ */
+function getStoredUser() {
+  try {
+    const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL || '').trim()
+    if (!supabaseUrl) return null
+    // Supabase v2 key format: sb-{project-ref}-auth-token
+    const projectRef = new URL(supabaseUrl).hostname.split('.')[0]
+    const storageKey = `sb-${projectRef}-auth-token`
+    const raw = localStorage.getItem(storageKey)
+    if (!raw) return null
+    const session = JSON.parse(raw)
+    // Only trust if the access token has >60 seconds of life left
+    // (expired sessions need a network refresh — let getSession() handle that)
+    if (session?.expires_at && session.expires_at * 1000 > Date.now() + 60_000) {
+      return session.user ?? null
+    }
+  } catch {}
+  return null
+}
+
+// ─── APP PROVIDER ────────────────────────────────────────────────────────────
+
 export function AppProvider({ children }) {
-  const [user, setUser] = useState(null)
-  const [loading, setLoading] = useState(true)
+  // Fast path: pre-populate user from localStorage so loading=true window is minimal
+  const [user, setUser] = useState(() => getStoredUser())
+  // If we got a user from localStorage, skip loading immediately
+  const [loading, setLoading] = useState(() => getStoredUser() === null)
   const [entries, setEntries] = useState([])
   const [entriesLoading, setEntriesLoading] = useState(false)
   const [entriesError, setEntriesError] = useState(null)
 
   // Auth
   useEffect(() => {
+    // Track whether loading has already been resolved (fast path or timeout)
+    let loadingResolved = loading === false // true if fast path already resolved it
+
+    // Safety timeout: if getSession() hangs (e.g., iPhone + slow network + token refresh),
+    // stop showing "Loading..." and fall back to the login screen after 5 seconds.
+    const timeoutId = setTimeout(() => {
+      if (!loadingResolved) {
+        loadingResolved = true
+        console.warn('[Clarity] getSession() timed out after', GETSESSION_TIMEOUT_MS, 'ms — showing login')
+        setUser(null)
+        setLoading(false)
+      }
+    }, GETSESSION_TIMEOUT_MS)
+
     supabase.auth.getSession().then(async ({ data: { session } }) => {
+      clearTimeout(timeoutId)
+
       const sessionUser = session?.user ?? null
-      setUser(sessionUser)   // fast: unblocks the app immediately
-      setLoading(false)
+
+      // Always update user to the authoritative value from getSession()
+      // (fast path may have been stale or slightly outdated)
+      setUser(sessionUser)
+
+      // Resolve loading if not already done (fast path or timeout)
+      if (!loadingResolved) {
+        loadingResolved = true
+        setLoading(false)
+      }
+
       if (sessionUser) {
+        // Synchronous — just writes to localStorage from user_metadata, no network
         loadNotionCredentialsFromUser(sessionUser)
         loadNotionSyncMapFromUser(sessionUser)
-        // Background: refresh user metadata (ai_context etc.) without blocking
+
+        // Background: refresh user metadata (ai_context etc.) without blocking render
+        // getUser() validates the JWT server-side and returns fresh metadata.
+        // We defer it here so it never blocks the initial render.
         try {
           const { data } = await supabase.auth.getUser()
           if (data?.user) {
@@ -36,8 +103,11 @@ export function AppProvider({ children }) {
       setUser(session?.user ?? null)
     })
 
-    return () => subscription.unsubscribe()
-  }, [])
+    return () => {
+      clearTimeout(timeoutId)
+      subscription.unsubscribe()
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fetch entries when user changes (with retry for Safari AbortError)
   const fetchEntries = useCallback(async () => {
