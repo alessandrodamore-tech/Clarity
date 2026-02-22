@@ -430,7 +430,7 @@ export default function Home() {
 
           <div className="feed-input-inner" style={{ opacity: saving ? 0.6 : 1, flex: 1 }}>
             <span className="feed-time" style={{ fontSize: '0.8rem', paddingTop: '3px', flexShrink: 0 }}>{time}</span>
-            <div className="feed-card-body" style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+            <div className="feed-card-body" style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
               <textarea
                 className="feed-input"
                 placeholder="Write anything..."
@@ -440,6 +440,7 @@ export default function Home() {
                 disabled={saving}
                 rows={1}
               />
+              {/* Send button — appare quando c'è testo */}
               <button
                 className="feed-send"
                 onClick={handleSubmit}
@@ -448,18 +449,20 @@ export default function Home() {
                 style={{
                   opacity: text.trim() ? 1 : 0,
                   pointerEvents: text.trim() ? 'auto' : 'none',
+                  flexShrink: 0,
                 }}
               >
                 <SendHorizontal size={16} />
               </button>
+              {/* Voice chat — appare quando non c'è testo */}
+              <VoiceChat
+                vapiPublicKey={VAPI_PUBLIC_KEY}
+                onEntryCreated={handleVoiceEntry}
+                hints={hints}
+                hideWhenText={Boolean(text.trim())}
+              />
             </div>
           </div>
-
-          <VoiceChat
-            vapiPublicKey={VAPI_PUBLIC_KEY}
-            onEntryCreated={handleVoiceEntry}
-            hints={hints}
-          />
 
           <NavLink to="/app/alerts" className="bottom-nav-btn glass" title="Alerts" style={{ position: 'relative' }}>
             <Bell size={22} />

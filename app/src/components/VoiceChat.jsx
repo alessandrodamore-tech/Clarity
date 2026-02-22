@@ -2,18 +2,24 @@ import React, { useState, useRef, useEffect, useCallback } from 'react'
 import Vapi from '@vapi-ai/web'
 
 // ─── Icone SVG inline ───────────────────────────────────
-const MicIcon = () => (
-  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24"
-    fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/>
-    <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
-    <line x1="12" y1="19" x2="12" y2="22"/>
-    <line x1="8" y1="22" x2="16" y2="22"/>
+// Waveform / equalizer — comunica "chat vocale", non registrazione
+const VoiceWaveIcon = ({ animated = false }) => (
+  <svg width="20" height="16" viewBox="0 0 20 16" fill="currentColor" style={{ display: 'block' }}>
+    <rect x="0" y="5" width="2.5" height="6" rx="1.25"
+      style={animated ? { animation: 'waveBar1 0.8s ease-in-out infinite' } : undefined} />
+    <rect x="4.5" y="2" width="2.5" height="12" rx="1.25"
+      style={animated ? { animation: 'waveBar2 0.8s ease-in-out infinite 0.1s' } : undefined} />
+    <rect x="9" y="0" width="2.5" height="16" rx="1.25"
+      style={animated ? { animation: 'waveBar3 0.8s ease-in-out infinite 0.2s' } : undefined} />
+    <rect x="13.5" y="2" width="2.5" height="12" rx="1.25"
+      style={animated ? { animation: 'waveBar2 0.8s ease-in-out infinite 0.3s' } : undefined} />
+    <rect x="18" y="5" width="2.5" height="6" rx="1.25"
+      style={animated ? { animation: 'waveBar1 0.8s ease-in-out infinite 0.4s' } : undefined} />
   </svg>
 )
 
 const StopIcon = () => (
-  <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24"
+  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
     fill="currentColor" stroke="none">
     <rect x="4" y="4" width="16" height="16" rx="2"/>
   </svg>
@@ -73,7 +79,7 @@ function buildEntryFromTranscript(messages) {
 }
 
 // ─── Componente principale ────────────────────────────────
-export default function VoiceChat({ vapiPublicKey, onEntryCreated, hints = [] }) {
+export default function VoiceChat({ vapiPublicKey, onEntryCreated, hints = [], hideWhenText = false }) {
   const [status, setStatus] = useState('idle') // idle | connecting | listening | thinking | speaking | ending
   const [error, setError] = useState(null)
   const [transcript, setTranscript] = useState([])
@@ -210,22 +216,32 @@ export default function VoiceChat({ vapiPublicKey, onEntryCreated, hints = [] })
   const isActive = ['connecting', 'listening', 'thinking', 'speaking'].includes(status)
   const { color } = statusConfig[status] || statusConfig.idle
 
+  // Nascondi se c'è testo nell'input e non siamo attivi
+  const hidden = hideWhenText && !isActive
+
   return (
-    <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+    <div style={{
+      position: 'relative',
+      display: 'flex',
+      alignItems: 'center',
+      opacity: hidden ? 0 : 1,
+      pointerEvents: hidden ? 'none' : 'auto',
+      transition: 'opacity 0.2s ease',
+      flexShrink: 0,
+    }}>
       {/* Tooltip errore */}
       {error && (
         <div style={{
           position: 'absolute',
           bottom: 'calc(100% + 10px)',
-          left: '50%',
-          transform: 'translateX(-50%)',
+          right: 0,
           background: 'rgba(220, 80, 80, 0.92)',
           backdropFilter: 'blur(12px)',
           color: '#fff',
           padding: '8px 14px',
           borderRadius: 12,
           fontSize: '0.75rem',
-          maxWidth: 260,
+          maxWidth: 240,
           whiteSpace: 'normal',
           textAlign: 'center',
           zIndex: 100,
@@ -245,8 +261,7 @@ export default function VoiceChat({ vapiPublicKey, onEntryCreated, hints = [] })
         <div style={{
           position: 'absolute',
           bottom: 'calc(100% + 10px)',
-          left: '50%',
-          transform: 'translateX(-50%)',
+          right: 0,
           background: 'rgba(255,255,255,0.85)',
           backdropFilter: 'blur(12px)',
           color: 'var(--text)',
@@ -261,53 +276,40 @@ export default function VoiceChat({ vapiPublicKey, onEntryCreated, hints = [] })
         </div>
       )}
 
-      {/* Bottone principale */}
+      {/* Bottone principale — inline, stesso stile del send button */}
       <button
         onClick={isActive ? stopCall : startCall}
         disabled={status === 'connecting' || status === 'ending'}
-        title={isActive ? 'Termina chat vocale' : 'Avvia chat vocale con Clarity'}
+        title={isActive ? 'Termina chat vocale' : 'Parla con Clarity'}
         style={{
-          width: 44,
-          height: 44,
-          borderRadius: '50%',
+          width: 36,
+          height: 36,
+          borderRadius: 12,
           cursor: status === 'connecting' || status === 'ending' ? 'wait' : 'pointer',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          color: isActive ? '#fff' : color,
+          color: isActive ? '#fff' : 'var(--text-light)',
           background: isActive
-            ? `linear-gradient(135deg, ${color}cc, ${color}88)`
-            : 'rgba(255,255,255,0.2)',
-          backdropFilter: 'blur(24px) saturate(190%)',
-          WebkitBackdropFilter: 'blur(24px) saturate(190%)',
-          border: `1px solid ${isActive ? color + '66' : 'rgba(255,255,255,0.5)'}`,
+            ? `linear-gradient(135deg, ${color}dd, ${color}99)`
+            : 'transparent',
+          border: isActive
+            ? `1px solid ${color}55`
+            : '1px solid transparent',
           boxShadow: isActive
-            ? `0 0 0 4px ${color}22, 0 8px 24px ${color}33, inset 0 1px 0 rgba(255,255,255,0.4)`
-            : '0 8px 32px rgba(100,80,160,0.08), inset 0 1px 0 rgba(255,255,255,0.7)',
-          transition: 'all 0.3s cubic-bezier(0.16, 1, 0.3, 1)',
-          transform: isActive ? 'scale(1.05)' : 'scale(1)',
+            ? `0 0 0 3px ${color}20, 0 4px 12px ${color}30`
+            : 'none',
+          transition: 'all 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
           position: 'relative',
           overflow: 'hidden',
-          flexShrink: 0,
+          padding: 0,
         }}
       >
-        {/* Pulse animation quando attivo */}
-        {isActive && (
-          <span style={{
-            position: 'absolute',
-            inset: 0,
-            borderRadius: '50%',
-            background: color,
-            opacity: 0.15,
-            animation: 'voicePulse 1.5s ease-in-out infinite',
-          }} />
-        )}
-
         {/* Spinner quando connecting/ending */}
         {(status === 'connecting' || status === 'ending') ? (
           <span style={{
-            width: 18,
-            height: 18,
+            width: 16,
+            height: 16,
             border: `2px solid ${color}44`,
             borderTop: `2px solid ${color}`,
             borderRadius: '50%',
@@ -317,19 +319,41 @@ export default function VoiceChat({ vapiPublicKey, onEntryCreated, hints = [] })
         ) : isActive ? (
           <StopIcon />
         ) : (
-          <MicIcon />
+          <VoiceWaveIcon animated={false} />
+        )}
+
+        {/* Waveform animata quando attivo */}
+        {isActive && status !== 'connecting' && status !== 'ending' && (
+          <span style={{
+            position: 'absolute',
+            inset: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: '#fff',
+          }}>
+            <VoiceWaveIcon animated={true} />
+          </span>
         )}
       </button>
 
-      {/* Stile CSS inline per animazioni */}
+      {/* CSS animazioni */}
       <style>{`
-        @keyframes voicePulse {
-          0%, 100% { transform: scale(1); opacity: 0.15; }
-          50% { transform: scale(1.5); opacity: 0; }
-        }
         @keyframes spin {
           from { transform: rotate(0deg); }
           to { transform: rotate(360deg); }
+        }
+        @keyframes waveBar1 {
+          0%, 100% { transform: scaleY(1); }
+          50% { transform: scaleY(0.4); }
+        }
+        @keyframes waveBar2 {
+          0%, 100% { transform: scaleY(1); }
+          50% { transform: scaleY(0.6); }
+        }
+        @keyframes waveBar3 {
+          0%, 100% { transform: scaleY(1); }
+          50% { transform: scaleY(0.3); }
         }
       `}</style>
     </div>
