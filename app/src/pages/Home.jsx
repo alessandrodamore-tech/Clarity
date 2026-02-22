@@ -145,9 +145,25 @@ export default function Home() {
   const handleSubmit = async () => {
     if (!text.trim() || saving) return
     const isFirst = entries.length === 0
-    const newEntry = { text: text.trim(), entry_date: nowDate(), entry_time: nowTime() }
+    const entryText = text.trim()
+    const newEntry = { text: entryText, entry_date: nowDate(), entry_time: nowTime() }
     setSaving(true)
-    await addEntry({ text: newEntry.text, date: newEntry.entry_date, time: newEntry.entry_time })
+
+    // Try to save — retry once if first attempt fails (handles expired token on iOS)
+    let result = await addEntry({ text: entryText, date: newEntry.entry_date, time: newEntry.entry_time })
+    if (result?.error) {
+      // Wait briefly for Supabase to refresh the session, then retry
+      await new Promise(r => setTimeout(r, 800))
+      result = await addEntry({ text: entryText, date: newEntry.entry_date, time: newEntry.entry_time })
+    }
+
+    if (result?.error) {
+      // Save failed after retry — keep text so user doesn't lose it
+      setSaving(false)
+      alert('Salvataggio fallito. Controlla la connessione e riprova.')
+      return
+    }
+
     setText(''); setTime(nowTime()); setSaving(false)
     if (isFirst) {
       setShowCelebration(true)
