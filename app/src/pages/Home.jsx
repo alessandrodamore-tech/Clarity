@@ -7,6 +7,8 @@ import VoiceChat from '../components/VoiceChat'
 import { generatePlaceholderHints } from '../lib/gemini'
 
 const VAPI_PUBLIC_KEY = import.meta.env.VITE_VAPI_PUBLIC_KEY
+const VAPI_ASSISTANT_ID = import.meta.env.VITE_VAPI_ASSISTANT_ID
+const USER_CONTEXT_KEY = 'clarity_user_context'
 
 function nowDate() { return new Date().toISOString().slice(0, 10) }
 function nowTime() { return new Date().toTimeString().slice(0, 5) }
@@ -457,8 +459,10 @@ export default function Home() {
               {/* Voice chat — appare quando non c'è testo */}
               <VoiceChat
                 vapiPublicKey={VAPI_PUBLIC_KEY}
+                assistantId={VAPI_ASSISTANT_ID}
                 onEntryCreated={handleVoiceEntry}
                 hints={hints}
+                userContext={(() => { try { return localStorage.getItem(USER_CONTEXT_KEY) || '' } catch { return '' } })()}
                 hideWhenText={Boolean(text.trim())}
               />
             </div>
