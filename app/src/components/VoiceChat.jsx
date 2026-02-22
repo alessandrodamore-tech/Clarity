@@ -159,10 +159,17 @@ export default function VoiceChat({
       const hintsText = hints.length > 0
         ? hints.slice(0, 5).map(h => `- ${h.text || h}`).join('\n')
         : ''
+
+      // Detect language from browser locale
+      const lang = navigator.language?.startsWith('it') ? 'Italian' : 'English'
+      const firstMsg = lang === 'Italian' ? 'Di\' pure, ti ascolto.' : 'Go ahead, I\'m listening.'
+
       await vapi.start(assistantId, {
         variableValues: {
           userContext: userContext || '',
           hints: hintsText,
+          language: lang,
+          firstMessage: firstMsg,
         },
       })
     } catch (err) {
