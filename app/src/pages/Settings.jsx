@@ -46,13 +46,19 @@ export default function Settings() {
     })
   }, [user])
 
-  // Load AI context from localStorage
+  // Load AI context: prefer Supabase user_metadata (cross-device), fall back to localStorage
   useEffect(() => {
-    try {
-      const stored = localStorage.getItem(CONTEXT_KEY)
-      if (stored) setContext(stored)
-    } catch {}
-  }, [])
+    const supabaseContext = user?.user_metadata?.ai_context
+    if (supabaseContext !== undefined && supabaseContext !== null) {
+      setContext(supabaseContext)
+      try { localStorage.setItem(CONTEXT_KEY, supabaseContext) } catch {}
+    } else {
+      try {
+        const stored = localStorage.getItem(CONTEXT_KEY)
+        if (stored) setContext(stored)
+      } catch {}
+    }
+  }, [user])
 
   // Load Notion credentials from user metadata (Supabase) or localStorage cache
   useEffect(() => {
@@ -109,16 +115,20 @@ export default function Settings() {
     }
   }
 
-  const handleSaveContext = () => {
+  const handleSaveContext = async () => {
+    const trimmed = context.trim()
+    // Save to localStorage immediately (fast, optimistic)
     try {
-      if (context.trim()) {
-        localStorage.setItem(CONTEXT_KEY, context.trim())
+      if (trimmed) {
+        localStorage.setItem(CONTEXT_KEY, trimmed)
       } else {
         localStorage.removeItem(CONTEXT_KEY)
       }
-      setContextSaved(true)
-      setTimeout(() => setContextSaved(false), 2000)
     } catch {}
+    // Persist to Supabase user_metadata for cross-device sync
+    await supabase.auth.updateUser({ data: { ai_context: trimmed || '' } })
+    setContextSaved(true)
+    setTimeout(() => setContextSaved(false), 2000)
   }
 
   const handleNotionConnect = async () => {
