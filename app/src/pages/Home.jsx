@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef, useMemo, Suspense } from 'react'
 import { useNavigate, NavLink } from 'react-router-dom'
 import { useApp } from '../lib/store'
+import { useToast } from '../lib/useToast'
+import { USER_CONTEXT_KEY, HINTS_CACHE_KEY, HINTS_TS_KEY } from '../lib/constants'
 import { BarChart3, Bell, Sparkles, ChevronDown, SendHorizontal, RefreshCw } from 'lucide-react'
 import EntryDetailModal from '../components/EntryDetailModal'
 import { generatePlaceholderHints } from '../lib/gemini'
@@ -12,7 +14,6 @@ const VoiceChat = React.lazy(() =>
 
 const VAPI_PUBLIC_KEY = import.meta.env.VITE_VAPI_PUBLIC_KEY
 const VAPI_ASSISTANT_ID = import.meta.env.VITE_VAPI_ASSISTANT_ID
-const USER_CONTEXT_KEY = 'clarity_user_context'
 
 function nowDate() { return new Date().toISOString().slice(0, 10) }
 function nowTime() { return new Date().toTimeString().slice(0, 5) }
@@ -49,6 +50,7 @@ function formatDatePill(dateStr) {
 export default function Home() {
   const navigate = useNavigate()
   const { user, entries, entriesLoading, addEntry, updateEntry, deleteEntry } = useApp()
+  const toast = useToast()
   const showAlertsBadge = useAlertsBadge(entries)
   const [text, setText] = useState('')
   const [time, setTime] = useState(nowTime())
@@ -56,14 +58,14 @@ export default function Home() {
   const [showCelebration, setShowCelebration] = useState(false)
   const [hints, setHints] = useState(() => {
     try {
-      const cached = JSON.parse(localStorage.getItem('clarity_hints') || '[]')
+      const cached = JSON.parse(localStorage.getItem(HINTS_CACHE_KEY) || '[]')
       if (cached.length > 0 && typeof cached[0] === 'string') return []
       return cached
     } catch { return [] }
   })
   const [hintsVisible, setHintsVisible] = useState(() => {
     try {
-      const cached = JSON.parse(localStorage.getItem('clarity_hints') || '[]')
+      const cached = JSON.parse(localStorage.getItem(HINTS_CACHE_KEY) || '[]')
       return cached.length > 0 && typeof cached[0] !== 'string'
     } catch { return false }
   })
@@ -110,7 +112,7 @@ export default function Home() {
   // Smart hints: show cached, regenerate if stale (>4h) or missing
   useEffect(() => {
     if (entriesLoading || entries.length === 0) return
-    const hintsTs = parseInt(localStorage.getItem('clarity_hints_ts') || '0', 10)
+    const hintsTs = parseInt(localStorage.getItem(HINTS_TS_KEY) || '0', 10)
     const isStale = Date.now() - hintsTs > 4 * 3600000
     if (hints.length > 0 && !isStale) {
       requestAnimationFrame(() => setHintsVisible(true))
@@ -122,8 +124,8 @@ export default function Home() {
       if (h && h.length > 0) {
         setHints(h)
         try {
-          localStorage.setItem('clarity_hints', JSON.stringify(h))
-          localStorage.setItem('clarity_hints_ts', Date.now().toString())
+          localStorage.setItem(HINTS_CACHE_KEY, JSON.stringify(h))
+          localStorage.setItem(HINTS_TS_KEY, Date.now().toString())
         } catch {}
         requestAnimationFrame(() => setHintsVisible(true))
       }
@@ -160,7 +162,7 @@ export default function Home() {
     if (result?.error) {
       // Save failed after retry — keep text so user doesn't lose it
       setSaving(false)
-      alert('Salvataggio fallito. Controlla la connessione e riprova.')
+      toast.error('Salvataggio fallito. Controlla la connessione.')
       return
     }
 
@@ -175,8 +177,8 @@ export default function Home() {
       if (h && h.length > 0) {
         setHints(h)
         try {
-          localStorage.setItem('clarity_hints', JSON.stringify(h))
-          localStorage.setItem('clarity_hints_ts', Date.now().toString())
+          localStorage.setItem(HINTS_CACHE_KEY, JSON.stringify(h))
+          localStorage.setItem(HINTS_TS_KEY, Date.now().toString())
         } catch {}
         requestAnimationFrame(() => setHintsVisible(true))
       }
@@ -196,8 +198,8 @@ export default function Home() {
       if (h && h.length > 0) {
         setHints(h)
         try {
-          localStorage.setItem('clarity_hints', JSON.stringify(h))
-          localStorage.setItem('clarity_hints_ts', Date.now().toString())
+          localStorage.setItem(HINTS_CACHE_KEY, JSON.stringify(h))
+          localStorage.setItem(HINTS_TS_KEY, Date.now().toString())
         } catch {}
         requestAnimationFrame(() => setHintsVisible(true))
       }
@@ -239,8 +241,8 @@ export default function Home() {
       if (h && h.length > 0) {
         setHints(h)
         try {
-          localStorage.setItem('clarity_hints', JSON.stringify(h))
-          localStorage.setItem('clarity_hints_ts', Date.now().toString())
+          localStorage.setItem(HINTS_CACHE_KEY, JSON.stringify(h))
+          localStorage.setItem(HINTS_TS_KEY, Date.now().toString())
         } catch {}
         requestAnimationFrame(() => setHintsVisible(true))
       }
@@ -264,8 +266,8 @@ export default function Home() {
     }
   }, [entriesLoading])
 
-  // Build entries with day separators
-  const renderEntries = () => {
+  // Build entries with day separators (memoized for performance)
+  const renderedEntries = useMemo(() => {
     const items = []
     let lastDate = null
 
@@ -319,12 +321,12 @@ export default function Home() {
     })
 
     return items
-  }
+  }, [sorted, mounted]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="home-feed" ref={feedRef} style={{ gap: '2px' }}>
       {/* Entries with day separators */}
-      {renderEntries()}
+      {renderedEntries}
 
       {/* Loading */}
       {entriesLoading && (
@@ -461,6 +463,7 @@ export default function Home() {
                 onKeyDown={handleKeyDown}
                 disabled={saving}
                 rows={1}
+                enterKeyHint="send"
               />
               {/* Send button — appare quando c'è testo */}
               <button
@@ -483,7 +486,7 @@ export default function Home() {
                   assistantId={VAPI_ASSISTANT_ID}
                   onEntryCreated={handleVoiceEntry}
                   hints={hints}
-                  userContext={(() => { try { return localStorage.getItem(USER_CONTEXT_KEY) || '' } catch { return '' } })()}
+                  userContext={localStorage.getItem(USER_CONTEXT_KEY) || ''}
                   hideWhenText={Boolean(text.trim())}
                 />
               </Suspense>

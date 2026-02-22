@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useApp } from '../lib/store'
 import { supabase } from '../lib/supabase'
 import { loadCachedSummaries, generateGlobalInsights } from '../lib/gemini'
+import { REPORTS_CACHE_KEY } from '../lib/constants'
 import WellnessHero from '../components/trends/WellnessHero'
 import AnalysisReport from '../components/trends/AnalysisReport'
 import DetailedStats from '../components/trends/DetailedStats'
@@ -25,7 +26,7 @@ export default function Trends() {
 
   // AI Report — persisted in localStorage + Supabase
   const [report, setReport] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('clarity_global_report') || 'null') } catch { return null }
+    try { return JSON.parse(localStorage.getItem(REPORTS_CACHE_KEY) || 'null') } catch { return null }
   })
   const [reportLoading, setReportLoading] = useState(false)
   const [reportError, setReportError] = useState(null)
@@ -49,7 +50,7 @@ export default function Trends() {
       .then(({ data }) => {
         if (data?.report_data) {
           setReport(data.report_data)
-          try { localStorage.setItem('clarity_global_report', JSON.stringify(data.report_data)) } catch {}
+          try { localStorage.setItem(REPORTS_CACHE_KEY, JSON.stringify(data.report_data)) } catch {}
         }
       })
   }, [user])
@@ -62,8 +63,8 @@ export default function Trends() {
         date,
         summary: data.summary,
         insight: data.insight,
-        substances: data.substances || [],
-        factors: data.substances || data.actions || [],
+        substances: data.actions || data.substances || data.factors || [],
+        factors: data.actions || data.substances || data.factors || [],
       }))
       .sort((a, b) => a.date.localeCompare(b.date)),
     [daySummaries]
@@ -78,7 +79,7 @@ export default function Trends() {
     try {
       const result = await generateGlobalInsights(analyzedDays)
       setReport(result)
-      try { localStorage.setItem('clarity_global_report', JSON.stringify(result)) } catch {}
+      try { localStorage.setItem(REPORTS_CACHE_KEY, JSON.stringify(result)) } catch {}
       // Persist to Supabase
       if (user?.id) {
         supabase.from('user_reports').upsert({

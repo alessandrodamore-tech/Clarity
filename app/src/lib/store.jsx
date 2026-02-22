@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react'
 import { supabase } from './supabase'
 import { autoSyncEntry, autoUpdateNotionEntry, getNotionCredentials, pullFromNotion, loadNotionCredentialsFromUser, loadNotionSyncMapFromUser } from './notion'
+import { queueEntry, syncOfflineQueue } from './offlineQueue'
 
 const AppContext = createContext(null)
 
@@ -28,6 +29,26 @@ function getStoredUser() {
     return session?.user ?? null
   } catch {}
   return null
+}
+
+/**
+ * Verifica che la sessione Supabase sia valida con un timeout di 3000ms.
+ * Su iPhone con rete lenta, getSession() può bloccarsi — questa funzione
+ * risolve null invece di bloccare, permettendo il fallback alla queue offline.
+ * @returns {Promise<import('@supabase/supabase-js').User|null>}
+ */
+async function ensureFreshSession() {
+  try {
+    const sessionPromise = supabase.auth.getSession()
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('getSession timeout')), 3000)
+    )
+    const { data: { session } } = await Promise.race([sessionPromise, timeoutPromise])
+    return session?.user ?? null
+  } catch (err) {
+    console.warn('[Clarity] ensureFreshSession: timeout o errore —', err.message)
+    return null
+  }
 }
 
 // ─── APP PROVIDER ────────────────────────────────────────────────────────────
@@ -96,9 +117,30 @@ export function AppProvider({ children }) {
       setUser(session?.user ?? null)
     })
 
+    // Sync offline queue when network comes back.
+    // We read the current session from Supabase rather than the closure value
+    // to avoid using a potentially stale `user` reference (this effect runs once with []).
+    const handleOnline = async () => {
+      console.log('[Clarity] network back online — attempting offline queue sync')
+      try {
+        const { data: { session } } = await supabase.auth.getSession()
+        const currentUser = session?.user ?? null
+        if (!currentUser) return
+        const result = await syncOfflineQueue(currentUser.id, supabase)
+        if (result.entries.length > 0) {
+          setEntries(prev => [...result.entries, ...prev])
+        }
+      } catch (err) {
+        console.warn('[Clarity] handleOnline: errore durante sync offline queue', err)
+      }
+    }
+
+    window.addEventListener('online', handleOnline)
+
     return () => {
       clearTimeout(timeoutId)
       subscription.unsubscribe()
+      window.removeEventListener('online', handleOnline)
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -146,13 +188,33 @@ export function AppProvider({ children }) {
 
   const addEntry = async (entry) => {
     if (!user) return
+
+    // Prepara i campi da inserire (usati sia per Supabase che per la queue)
+    const entry_date = entry.date || new Date().toISOString().split('T')[0]
+    const entry_time = entry.time || new Date().toTimeString().slice(0, 5)
+
+    // Fallback alla queue offline se la rete è assente
+    if (!navigator.onLine) {
+      console.warn('[Clarity] addEntry: nessuna connessione — entry accodata offline')
+      queueEntry({ text: entry.text, entry_date, entry_time })
+      return { data: null, error: null, queued: true }
+    }
+
+    // Fallback alla queue offline se la sessione è scaduta o irraggiungibile
+    const freshUser = await ensureFreshSession()
+    if (!freshUser) {
+      console.warn('[Clarity] addEntry: sessione non fresca — entry accodata offline')
+      queueEntry({ text: entry.text, entry_date, entry_time })
+      return { data: null, error: null, queued: true }
+    }
+
     const { data, error } = await supabase
       .from('entries')
       .insert({
         user_id: user.id,
         raw_text: entry.text,
-        entry_date: entry.date || new Date().toISOString().split('T')[0],
-        entry_time: entry.time || new Date().toTimeString().slice(0, 5),
+        entry_date,
+        entry_time,
         source: 'manual',
       })
       .select()

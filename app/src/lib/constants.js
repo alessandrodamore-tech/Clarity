@@ -18,3 +18,20 @@ export const TYPE_LABELS = {
   medication: 'Medications', supplement: 'Supplements', caffeine: 'Caffeine', substance: 'Substances',
   exercise: 'Exercise', wellness: 'Wellness', social: 'Social', therapy: 'Therapy', other: 'Other',
 }
+
+// ─── LocalStorage Keys ───────────────────────────────────
+export const USER_CONTEXT_KEY = 'clarity_user_context'
+export const HINTS_CACHE_KEY = 'clarity_hints'
+export const HINTS_TS_KEY = 'clarity_hints_ts'
+export const OFFLINE_QUEUE_KEY = 'clarity_offline_queue'
+export const INSIGHTS_CACHE_KEY = 'clarity_insights'
+export const REPORTS_CACHE_KEY = 'clarity_global_report'
+export const ALERTS_HASH_KEY = 'clarity_alerts_hash'
+export const DAY_SUMMARIES_CACHE_KEY = 'clarity_day_summaries'
+export const ONBOARDING_ANALYSIS_HINT_KEY = 'clarity_onboarding_analysis_hint_dismissed'
+
+// ─── App Config ───────────────────────────────────────────
+export const APP_VERSION = '0.8.0'
+export const GEMINI_MODEL = 'gemini-3.1-pro-preview'
+export const HINTS_STALE_MS = 4 * 60 * 60 * 1000  // 4 hours
+export const GETSESSION_TIMEOUT_MS = 5000

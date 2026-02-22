@@ -1,26 +1,33 @@
 {
   "name": "Clarity",
   "short_name": "Clarity",
-  "description": "Your mind, decoded. AI-powered mental health journaling.",
+  "description": "Your mind, decoded.",
   "start_url": "/app",
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#ede4f0",
-  "theme_color": "#2a2a45",
+  "background_color": "#f0eef8",
+  "theme_color": "#a78bfa",
   "icons": [
     {
-      "src": "/clarity.svg",
-      "sizes": "any",
-      "type": "image/svg+xml",
-      "purpose": "any"
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
     },
     {
-      "src": "/clarity.svg",
-      "sizes": "any",
-      "type": "image/svg+xml",
-      "purpose": "maskable"
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-180.png",
+      "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "apple touch icon"
     }
   ],
-  "prefer_related_applications": false
+  "categories": ["health", "lifestyle"],
+  "lang": "en"
 }

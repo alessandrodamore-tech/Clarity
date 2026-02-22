@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react'
 import Vapi from '@vapi-ai/web'
 import { generateAnnotationFromVoiceChat } from '../lib/gemini'
+import { useToast } from '../lib/useToast'
 
 // ─── iOS Safari / feature detection helpers ───────────────────────────────────
 
@@ -87,6 +88,7 @@ export default function VoiceChat({
   userContext = '',
   hideWhenText = false,
 }) {
+  const toast = useToast()
   const [status, setStatus] = useState('idle')
   const [showModal, setShowModal] = useState(false)
   const [messages, setMessages] = useState([]) // [{role, content, id}]
@@ -176,7 +178,8 @@ export default function VoiceChat({
       } else if (msg.toLowerCase().includes('network') || msg.toLowerCase().includes('ice')) {
         userMsg = 'Network error. Check your connection and try again.'
       }
-      setError(userMsg)
+      toast.error(userMsg)
+      setError(null)
       setStatus('idle')
     })
 
@@ -256,7 +259,8 @@ export default function VoiceChat({
           : 'Audio connection aborted. Please try again.'
       }
 
-      setError(msg)
+      toast.error(msg)
+      setError(null)
       setStatus('idle')
     }
   }
@@ -290,6 +294,17 @@ export default function VoiceChat({
   const isActive = ['connecting', 'listening', 'thinking', 'speaking'].includes(status)
   const isEnding = status === 'ending'
   const hidden = hideWhenText && !isActive && !showModal
+
+  // ── iOS: stop call when app is backgrounded ────────────────
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (document.hidden && isActive) {
+        stopCall()
+      }
+    }
+    document.addEventListener('visibilitychange', handleVisibility)
+    return () => document.removeEventListener('visibilitychange', handleVisibility)
+  }, [isActive]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const statusLabel = {
     connecting: 'Connecting...',

@@ -2,16 +2,17 @@ import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { User, Upload, Info, LogOut, Trash2, Check, RefreshCw, Link2, Unlink, ArrowUpFromLine, ArrowDownToLine } from 'lucide-react'
 import { useApp } from '../lib/store'
+import { useToast } from '../lib/useToast'
+import { APP_VERSION, USER_CONTEXT_KEY } from '../lib/constants'
 import { supabase } from '../lib/supabase'
 import { loadCachedSummaries } from '../lib/gemini'
 import { getNotionCredentials, saveNotionCredentials, clearNotionCredentials, loadNotionCredentialsFromUser, testNotionConnection, pushToNotion, pullFromNotion, cleanupNotionDuplicates } from '../lib/notion'
 import { FeatureHint } from '../components/Onboarding'
 
-const CONTEXT_KEY = 'clarity_user_context'
-
 export default function Settings() {
   const navigate = useNavigate()
   const { user, setUser, entries, addEntry, fetchEntries } = useApp()
+  const toast = useToast()
 
   const [displayName, setDisplayName] = useState('')
   const [timezone, setTimezone] = useState('')
@@ -28,9 +29,9 @@ export default function Settings() {
   const [notionTesting, setNotionTesting] = useState(false)
   const [notionSyncing, setNotionSyncing] = useState(false)
   const [notionPulling, setNotionPulling] = useState(false)
-  const [notionMsg, setNotionMsg] = useState(null)
   const [notionProgress, setNotionProgress] = useState('')
   const [notionCleaning, setNotionCleaning] = useState(false)
+  const [confirmCleanup, setConfirmCleanup] = useState(false)
 
   useEffect(() => {
     if (!user) return
@@ -51,10 +52,10 @@ export default function Settings() {
     const supabaseContext = user?.user_metadata?.ai_context
     if (supabaseContext !== undefined && supabaseContext !== null) {
       setContext(supabaseContext)
-      try { localStorage.setItem(CONTEXT_KEY, supabaseContext) } catch {}
+      try { localStorage.setItem(USER_CONTEXT_KEY, supabaseContext) } catch {}
     } else {
       try {
-        const stored = localStorage.getItem(CONTEXT_KEY)
+        const stored = localStorage.getItem(USER_CONTEXT_KEY)
         if (stored) setContext(stored)
       } catch {}
     }
@@ -120,9 +121,9 @@ export default function Settings() {
     // Save to localStorage immediately (fast, optimistic)
     try {
       if (trimmed) {
-        localStorage.setItem(CONTEXT_KEY, trimmed)
+        localStorage.setItem(USER_CONTEXT_KEY, trimmed)
       } else {
-        localStorage.removeItem(CONTEXT_KEY)
+        localStorage.removeItem(USER_CONTEXT_KEY)
       }
     } catch {}
     // Persist to Supabase user_metadata for cross-device sync
@@ -133,19 +134,18 @@ export default function Settings() {
 
   const handleNotionConnect = async () => {
     if (!notionToken.trim() || !notionDbId.trim()) {
-      setNotionMsg({ type: 'error', text: 'Token and Database ID are required' })
+      toast.error('Token and Database ID are required')
       return
     }
     setNotionTesting(true)
-    setNotionMsg(null)
     try {
       const result = await testNotionConnection(notionToken.trim(), notionDbId.trim())
       await saveNotionCredentials(notionToken.trim(), notionDbId.trim(), result.title, result.title_property)
       setNotionDbName(result.title)
       setNotionConnected(true)
-      setNotionMsg({ type: 'success', text: `Connected to "${result.title}"` })
+      toast.success(`Connected to "${result.title}"`)
     } catch (e) {
-      setNotionMsg({ type: 'error', text: e.message })
+      toast.error(e.message)
     } finally {
       setNotionTesting(false)
     }
@@ -157,16 +157,14 @@ export default function Settings() {
     setNotionDbId('')
     setNotionDbName('')
     setNotionConnected(false)
-    setNotionMsg(null)
   }
 
   const handleNotionPush = async () => {
     if (!entries?.length) {
-      setNotionMsg({ type: 'error', text: 'No entries to sync' })
+      toast.error('No entries to sync')
       return
     }
     setNotionSyncing(true)
-    setNotionMsg(null)
     setNotionProgress('')
     try {
       const result = await pushToNotion(
@@ -175,12 +173,12 @@ export default function Settings() {
       )
       setNotionProgress('')
       if (result.pushed === 0) {
-        setNotionMsg({ type: 'success', text: `All ${result.alreadySynced} entries already synced` })
+        toast.success(`All ${result.alreadySynced} entries already synced`)
       } else {
-        setNotionMsg({ type: 'success', text: `Pushed ${result.pushed} new entries to Notion` })
+        toast.success(`Pushed ${result.pushed} new entries to Notion`)
       }
     } catch (e) {
-      setNotionMsg({ type: 'error', text: e.message })
+      toast.error(e.message)
       setNotionProgress('')
     } finally {
       setNotionSyncing(false)
@@ -189,11 +187,10 @@ export default function Settings() {
 
   const handleNotionPull = async () => {
     setNotionPulling(true)
-    setNotionMsg(null)
     try {
       const newEntries = await pullFromNotion(notionToken, notionDbId, entries || [])
       if (newEntries.length === 0) {
-        setNotionMsg({ type: 'success', text: 'No new entries found in Notion' })
+        toast.success('No new entries found in Notion')
       } else {
         // Insert directly via supabase (NOT addEntry) to avoid re-pushing to Notion
         let imported = 0
@@ -213,19 +210,18 @@ export default function Settings() {
         }
         // Refresh entries list from DB
         await fetchEntries()
-        setNotionMsg({ type: 'success', text: `Imported ${imported} entries from Notion` })
+        toast.success(`Imported ${imported} entries from Notion`)
       }
     } catch (e) {
-      setNotionMsg({ type: 'error', text: e.message })
+      toast.error(e.message)
     } finally {
       setNotionPulling(false)
     }
   }
 
   const handleNotionCleanup = async () => {
-    if (!confirm('This will archive duplicate pages in your Notion database (keeps the oldest copy). Continue?')) return
     setNotionCleaning(true)
-    setNotionMsg(null)
+    setConfirmCleanup(false)
     setNotionProgress('')
     try {
       const result = await cleanupNotionDuplicates(
@@ -233,9 +229,9 @@ export default function Settings() {
         (done, total) => setNotionProgress(`${done}/${total}`)
       )
       setNotionProgress('')
-      setNotionMsg({ type: 'success', text: `Done! Found ${result.duplicates} duplicates, archived ${result.archived}. ${result.total - result.duplicates} unique pages remain.` })
+      toast.success(`Done! Found ${result.duplicates} duplicates, archived ${result.archived}. ${result.total - result.duplicates} unique pages remain.`)
     } catch (e) {
-      setNotionMsg({ type: 'error', text: e.message })
+      toast.error(e.message)
       setNotionProgress('')
     } finally {
       setNotionCleaning(false)
@@ -510,44 +506,66 @@ export default function Settings() {
             </div>
 
             {/* Cleanup duplicates */}
-            <button
-              onClick={handleNotionCleanup}
-              disabled={notionSyncing || notionPulling || notionCleaning}
-              style={{
-                marginTop: 10, width: '100%', padding: '10px 16px', borderRadius: 'var(--radius)',
-                background: 'rgba(232,168,56,0.08)', color: 'var(--amber)',
-                border: '1px solid rgba(232,168,56,0.2)',
-                cursor: notionCleaning ? 'wait' : 'pointer',
-                fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: '0.78rem',
-                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-                opacity: (notionSyncing || notionPulling || notionCleaning) ? 0.6 : 1,
-                transition: 'all 0.2s',
-              }}
-            >
-              {notionCleaning ? (
-                <><RefreshCw size={12} style={{ animation: 'spin 1s linear infinite' }} /> Cleaning {notionProgress || '...'}</>
-              ) : (
-                <><Trash2 size={12} /> Clean Notion Duplicates</>
-              )}
-            </button>
+            {confirmCleanup ? (
+              <div style={{ marginTop: 10, display: 'flex', gap: 8, alignItems: 'center' }}>
+                <p style={{ flex: 1, margin: 0, fontSize: '0.78rem', color: 'var(--text-muted)', lineHeight: 1.5 }}>
+                  This will archive duplicates in Notion (keeps oldest copy).
+                </p>
+                <button
+                  onClick={handleNotionCleanup}
+                  style={{
+                    padding: '8px 14px', borderRadius: 'var(--radius)',
+                    background: 'rgba(220,60,60,0.12)', color: '#dc3c3c',
+                    border: '1px solid rgba(220,60,60,0.2)',
+                    cursor: 'pointer', fontFamily: 'var(--font-display)',
+                    fontWeight: 600, fontSize: '0.78rem', whiteSpace: 'nowrap',
+                  }}
+                >
+                  Confirm
+                </button>
+                <button
+                  onClick={() => setConfirmCleanup(false)}
+                  style={{
+                    padding: '8px 14px', borderRadius: 'var(--radius)',
+                    background: 'rgba(0,0,0,0.05)', color: 'var(--text-muted)',
+                    border: '1px solid rgba(0,0,0,0.1)',
+                    cursor: 'pointer', fontFamily: 'var(--font-display)',
+                    fontWeight: 600, fontSize: '0.78rem',
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setConfirmCleanup(true)}
+                disabled={notionSyncing || notionPulling || notionCleaning}
+                style={{
+                  marginTop: 10, width: '100%', padding: '10px 16px', borderRadius: 'var(--radius)',
+                  background: 'rgba(232,168,56,0.08)', color: 'var(--amber)',
+                  border: '1px solid rgba(232,168,56,0.2)',
+                  cursor: notionCleaning ? 'wait' : 'pointer',
+                  fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: '0.78rem',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                  opacity: (notionSyncing || notionPulling || notionCleaning) ? 0.6 : 1,
+                  transition: 'all 0.2s',
+                }}
+              >
+                {notionCleaning ? (
+                  <><RefreshCw size={12} style={{ animation: 'spin 1s linear infinite' }} /> Cleaning {notionProgress || '...'}</>
+                ) : (
+                  <><Trash2 size={12} /> Clean Notion Duplicates</>
+                )}
+              </button>
+            )}
           </>
-        )}
-
-        {/* Status message */}
-        {notionMsg && (
-          <div style={{
-            marginTop: 12, padding: '10px 14px', borderRadius: 10, fontSize: '0.82rem',
-            background: notionMsg.type === 'error' ? 'rgba(255,80,80,0.12)' : 'rgba(58,138,106,0.1)',
-            color: notionMsg.type === 'error' ? '#dc3c3c' : '#3a8a6a',
-            border: `1px solid ${notionMsg.type === 'error' ? 'rgba(255,80,80,0.2)' : 'rgba(58,138,106,0.2)'}`,
-          }}>{notionMsg.text}</div>
         )}
       </div>
 
       {/* About */}
       <div className="glass" style={{ borderRadius: 'var(--radius-lg)', padding: 24, textAlign: 'center' }}>
         <Info size={18} style={{ color: 'var(--text-light)', marginBottom: 8 }} />
-        <p style={{ color: 'var(--text-light)', fontSize: '0.85rem' }}>Clarity v0.3.2 — Your mind, decoded.</p>
+        <p style={{ color: 'var(--text-light)', fontSize: '0.85rem' }}>{`Clarity v${APP_VERSION}`} — Your mind, decoded.</p>
       </div>
 
       {/* Your Journey */}

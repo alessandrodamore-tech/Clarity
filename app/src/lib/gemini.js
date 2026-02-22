@@ -1,14 +1,11 @@
 import { supabase } from './supabase'
+import { USER_CONTEXT_KEY, GEMINI_MODEL, DAY_SUMMARIES_CACHE_KEY } from './constants'
 
 const DIRECT_API_KEY = import.meta.env.VITE_GEMINI_API_KEY
-const MODEL = 'gemini-3.1-pro-preview'
 const DIRECT_API_URL = DIRECT_API_KEY
-  ? `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${DIRECT_API_KEY}`
+  ? `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${DIRECT_API_KEY}`
   : null
 const PROXY_URL = '/api/gemini'
-
-const CACHE_KEY = 'clarity_day_summaries'
-const USER_CONTEXT_KEY = 'clarity_user_context'
 
 // ─── USER CONTEXT (profile instructions) ─────────────────
 function getUserContext() {
@@ -53,12 +50,12 @@ function hashEntries(entries) {
 
 // ─── CACHE HELPERS (localStorage + Supabase) ─────────────
 function loadCache() {
-  try { return JSON.parse(localStorage.getItem(CACHE_KEY) || '{}') } catch { return {} }
+  try { return JSON.parse(localStorage.getItem(DAY_SUMMARIES_CACHE_KEY) || '{}') } catch { return {} }
 }
 function saveToCache(dateKey, data) {
   const cache = loadCache()
   cache[dateKey] = data
-  try { localStorage.setItem(CACHE_KEY, JSON.stringify(cache)) } catch {}
+  try { localStorage.setItem(DAY_SUMMARIES_CACHE_KEY, JSON.stringify(cache)) } catch {}
 }
 
 // Save to Supabase (fire-and-forget)
@@ -104,7 +101,7 @@ export async function loadCachedSummaries(userId) {
       }
     }
     // Update localStorage with merged data
-    try { localStorage.setItem(CACHE_KEY, JSON.stringify(merged)) } catch {}
+    try { localStorage.setItem(DAY_SUMMARIES_CACHE_KEY, JSON.stringify(merged)) } catch {}
     return merged
   } catch {
     return local
@@ -112,7 +109,7 @@ export async function loadCachedSummaries(userId) {
 }
 
 export async function clearSummaryCache(userId) {
-  localStorage.removeItem(CACHE_KEY)
+  localStorage.removeItem(DAY_SUMMARIES_CACHE_KEY)
   if (userId) {
     try {
       await supabase.from('day_analyses').delete().eq('user_id', userId)
