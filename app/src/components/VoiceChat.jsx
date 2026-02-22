@@ -2,19 +2,27 @@ import React, { useState, useRef, useEffect, useCallback } from 'react'
 import Vapi from '@vapi-ai/web'
 
 // ─── Icone SVG inline ───────────────────────────────────
-// Waveform / equalizer — comunica "chat vocale", non registrazione
+// Chat bubble con waveform inside — comunica chiaramente "chat vocale"
 const VoiceWaveIcon = ({ animated = false }) => (
-  <svg width="20" height="16" viewBox="0 0 20 16" fill="currentColor" style={{ display: 'block' }}>
-    <rect x="0" y="5" width="2.5" height="6" rx="1.25"
-      style={animated ? { animation: 'waveBar1 0.8s ease-in-out infinite' } : undefined} />
-    <rect x="4.5" y="2" width="2.5" height="12" rx="1.25"
-      style={animated ? { animation: 'waveBar2 0.8s ease-in-out infinite 0.1s' } : undefined} />
-    <rect x="9" y="0" width="2.5" height="16" rx="1.25"
-      style={animated ? { animation: 'waveBar3 0.8s ease-in-out infinite 0.2s' } : undefined} />
-    <rect x="13.5" y="2" width="2.5" height="12" rx="1.25"
-      style={animated ? { animation: 'waveBar2 0.8s ease-in-out infinite 0.3s' } : undefined} />
-    <rect x="18" y="5" width="2.5" height="6" rx="1.25"
-      style={animated ? { animation: 'waveBar1 0.8s ease-in-out infinite 0.4s' } : undefined} />
+  <svg width="22" height="21" viewBox="0 0 22 21" fill="currentColor" style={{ display: 'block' }}>
+    {/* Chat bubble */}
+    <path
+      d="M2 1h18a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H7.5L2 18V2a1 1 0 0 1 1-1z"
+      fillOpacity="0.12"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinejoin="round"
+      fill="currentColor"
+    />
+    {/* Waveform bars inside the bubble */}
+    <rect x="5.5" y="7" width="1.8" height="3" rx="0.9"
+      style={animated ? { animation: 'waveBar1 0.7s ease-in-out infinite', transformOrigin: '6.4px 8.5px' } : undefined} />
+    <rect x="8.5" y="5.5" width="1.8" height="6" rx="0.9"
+      style={animated ? { animation: 'waveBar2 0.7s ease-in-out infinite 0.1s', transformOrigin: '9.4px 8.5px' } : undefined} />
+    <rect x="11.5" y="4.5" width="1.8" height="8" rx="0.9"
+      style={animated ? { animation: 'waveBar3 0.7s ease-in-out infinite 0.2s', transformOrigin: '12.4px 8.5px' } : undefined} />
+    <rect x="14.5" y="5.5" width="1.8" height="6" rx="0.9"
+      style={animated ? { animation: 'waveBar2 0.7s ease-in-out infinite 0.3s', transformOrigin: '15.4px 8.5px' } : undefined} />
   </svg>
 )
 
@@ -47,8 +55,8 @@ Parla in italiano, sii naturale e caldo ma conciso. Ogni risposta deve essere ma
       ],
     },
     voice: {
-      provider: 'playht',
-      voiceId: 'jennifer',
+      provider: 'openai',
+      voiceId: 'shimmer',
     },
     firstMessage: 'Ciao! Come stai oggi?',
     endCallMessage: 'Perfetto, creo l\'annotazione. A presto!',
@@ -317,23 +325,10 @@ export default function VoiceChat({ vapiPublicKey, onEntryCreated, hints = [], h
             display: 'block',
           }} />
         ) : isActive ? (
-          <StopIcon />
+          // Waveform animata quando attivo — tocca per fermare
+          <VoiceWaveIcon animated={true} />
         ) : (
           <VoiceWaveIcon animated={false} />
-        )}
-
-        {/* Waveform animata quando attivo */}
-        {isActive && status !== 'connecting' && status !== 'ending' && (
-          <span style={{
-            position: 'absolute',
-            inset: 0,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            color: '#fff',
-          }}>
-            <VoiceWaveIcon animated={true} />
-          </span>
         )}
       </button>
 
