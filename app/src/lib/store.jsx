@@ -12,28 +12,20 @@ const AppContext = createContext(null)
 const GETSESSION_TIMEOUT_MS = 5000
 
 /**
- * Fast path: reads the Supabase session directly from localStorage without
- * making any network request. Returns the stored user object if a valid,
- * non-expired session exists (with >60s to spare), otherwise null.
- *
- * This lets returning users skip the "Loading..." screen entirely.
- * getSession() still runs in the background to confirm/refresh the session.
+ * Fast path: reads any stored Supabase session from localStorage instantly.
+ * Returns the user regardless of token expiry — Supabase auto-refreshes tokens
+ * on the first API call, so passing a slightly-expired user is safe.
+ * Returns null only if there is no session at all (new user / logged out).
  */
 function getStoredUser() {
   try {
     const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL || '').trim()
     if (!supabaseUrl) return null
-    // Supabase v2 key format: sb-{project-ref}-auth-token
     const projectRef = new URL(supabaseUrl).hostname.split('.')[0]
-    const storageKey = `sb-${projectRef}-auth-token`
-    const raw = localStorage.getItem(storageKey)
+    const raw = localStorage.getItem(`sb-${projectRef}-auth-token`)
     if (!raw) return null
     const session = JSON.parse(raw)
-    // Only trust if the access token has >60 seconds of life left
-    // (expired sessions need a network refresh — let getSession() handle that)
-    if (session?.expires_at && session.expires_at * 1000 > Date.now() + 60_000) {
-      return session.user ?? null
-    }
+    return session?.user ?? null
   } catch {}
   return null
 }
@@ -41,10 +33,11 @@ function getStoredUser() {
 // ─── APP PROVIDER ────────────────────────────────────────────────────────────
 
 export function AppProvider({ children }) {
-  // Fast path: pre-populate user from localStorage so loading=true window is minimal
-  const [user, setUser] = useState(() => getStoredUser())
-  // If we got a user from localStorage, skip loading immediately
-  const [loading, setLoading] = useState(() => getStoredUser() === null)
+  // Fast path: if ANY session is stored, show content immediately (no loading screen).
+  // Supabase auto-refreshes expired tokens on first API call — no flash of wrong content.
+  const _initialUser = getStoredUser()
+  const [user, setUser] = useState(_initialUser)
+  const [loading, setLoading] = useState(!_initialUser)
   const [entries, setEntries] = useState([])
   const [entriesLoading, setEntriesLoading] = useState(false)
   const [entriesError, setEntriesError] = useState(null)
