@@ -20,14 +20,9 @@ const VoiceWaveIcon = ({ animated = false }) => (
 
 // ─── Assistente Vapi inline config ────────────────────────
 function buildAssistantConfig(hints) {
-  // Usa le hint chips come domande effettive da fare all'utente
-  const hintQuestions = hints && hints.length > 0
-    ? hints.slice(0, 5).map(h => `- ${h.text || h}`).join('\n')
-    : null
-
-  const questionsBlock = hintQuestions
-    ? `\nFai queste domande specifiche all'utente (nell'ordine che senti più naturale, non farle tutte se non è necessario):\n${hintQuestions}`
-    : '\nFai 2-3 domande aperte sul loro stato fisico, emotivo e sulle attività della giornata.'
+  const hintContext = hints && hints.length > 0
+    ? `\nSe l'utente non menziona spontaneamente questi aspetti, potresti chiedere (scegli al massimo 1-2, solo se pertinenti):\n${hints.slice(0, 4).map(h => `- ${h.text || h}`).join('\n')}`
+    : ''
 
   return {
     model: {
@@ -36,16 +31,20 @@ function buildAssistantConfig(hints) {
       messages: [
         {
           role: 'system',
-          content: `Sei un assistente di journaling personale chiamato Clarity.
-Il tuo compito è fare domande brevi e dirette per aiutare l'utente a raccontare com'è andata la giornata.
-${questionsBlock}
+          content: `Sei un assistente di journaling personale chiamato Clarity. Il tuo ruolo è ascoltare, non interrogare.
 
-Regole:
-- Fai UNA domanda alla volta, aspetta la risposta prima di andare avanti
-- Sii naturale e caldo, come un amico che chiede com'è andata
-- Ogni risposta deve essere massimo 2 frasi
-- Dopo 2-3 scambi, concludi dicendo "Perfetto, creo l'annotazione" e saluta brevemente
-- Parla in italiano`,
+Flusso della conversazione:
+1. L'utente parla liberamente — tu ASCOLTI senza interrompere
+2. Solo dopo che ha finito, fai AL MASSIMO 1-2 domande di follow-up brevi, solo se ci sono cose poco chiare o aspetti importanti che non ha menzionato
+3. Quando hai abbastanza, concludi con "Perfetto, creo l'annotazione"
+${hintContext}
+
+Regole assolute:
+- NON fare domande lunghe o multiple
+- NON anticipare o interrompere l'utente
+- Risposte brevissime (1 frase max)
+- Parla in italiano
+- Se l'utente ha già detto abbastanza, vai direttamente a "Perfetto, creo l'annotazione"`,
         },
       ],
     },
@@ -53,15 +52,15 @@ Regole:
       provider: 'openai',
       voiceId: 'shimmer',
     },
-    firstMessage: 'Ciao! Come stai?',
-    endCallMessage: "Perfetto, creo l'annotazione. A presto!",
-    endCallPhrases: ["creo l'annotazione", 'a presto', 'arrivederci'],
+    firstMessage: 'Ciao, di pure.',
+    endCallMessage: "Perfetto, creo l'annotazione.",
+    endCallPhrases: ["creo l'annotazione", 'annotazione', 'a presto', 'arrivederci'],
     transcriber: {
       provider: 'deepgram',
       model: 'nova-2',
       language: 'it',
     },
-    silenceTimeoutSeconds: 20,
+    silenceTimeoutSeconds: 25,
     maxDurationSeconds: 300,
   }
 }
@@ -75,6 +74,9 @@ export default function VoiceChat({ vapiPublicKey, onEntryCreated, hints = [], h
   const vapiRef = useRef(null)
   const hasCreatedEntry = useRef(false)
   const callEndedNaturally = useRef(false)
+  const transcriptRef = useRef([]) // ref sincrono, sempre aggiornato anche in call-end
+  const onEntryCreatedRef = useRef(onEntryCreated)
+  useEffect(() => { onEntryCreatedRef.current = onEntryCreated }, [onEntryCreated])
 
   // ── Inizializza Vapi (una sola istanza) ───────────────────
   const getVapi = useCallback(() => {
@@ -87,6 +89,7 @@ export default function VoiceChat({ vapiPublicKey, onEntryCreated, hints = [], h
       setStatus('listening')
       setError(null)
       setTranscript([])
+      transcriptRef.current = []
       hasCreatedEntry.current = false
       callEndedNaturally.current = false
     })
@@ -95,19 +98,32 @@ export default function VoiceChat({ vapiPublicKey, onEntryCreated, hints = [], h
     vapi.on('speech-end', () => setStatus('listening'))
 
     vapi.on('message', (msg) => {
-      // Accumula trascrizione completa (utente + assistente)
+      // Accumula trascrizione completa (utente + assistente) sia nel ref (sincrono) che nello stato
       if (msg.type === 'transcript' && msg.transcriptType === 'final') {
-        setTranscript(prev => [...prev, {
-          role: msg.role, // 'user' | 'assistant'
-          content: msg.transcript,
-        }])
+        const entry = { role: msg.role, content: msg.transcript }
+        transcriptRef.current = [...transcriptRef.current, entry]
+        setTranscript(prev => [...prev, entry])
       }
       if (msg.type === 'model-output') setStatus('thinking')
     })
 
     vapi.on('call-end', () => {
       callEndedNaturally.current = true
-      setStatus('ending')
+      const conv = transcriptRef.current
+
+      if (conv.length > 0 && !hasCreatedEntry.current) {
+        hasCreatedEntry.current = true
+        setStatus('ending')
+        // Genera annotazione direttamente qui — non aspettare il useEffect con lo stato
+        generateAnnotationFromVoiceChat(conv)
+          .then(annotation => {
+            if (annotation && onEntryCreatedRef.current) onEntryCreatedRef.current(annotation)
+          })
+          .catch(e => console.error('[VoiceChat] Annotation failed:', e))
+          .finally(() => setStatus('idle'))
+      } else {
+        setStatus('idle')
+      }
     })
 
     vapi.on('error', (err) => {
@@ -121,28 +137,6 @@ export default function VoiceChat({ vapiPublicKey, onEntryCreated, hints = [], h
     vapiRef.current = vapi
     return vapi
   }, [vapiPublicKey])
-
-  // ── Genera annotazione da Gemini e crea entry ──────────────
-  useEffect(() => {
-    if (status !== 'ending' || hasCreatedEntry.current || transcript.length === 0) return
-    hasCreatedEntry.current = true
-
-    const createEntry = async () => {
-      try {
-        // Passa tutta la conversazione a Gemini per generare annotazione in prima persona
-        const annotation = await generateAnnotationFromVoiceChat(transcript)
-        if (annotation && onEntryCreated) {
-          await onEntryCreated(annotation)
-        }
-      } catch (e) {
-        console.error('[VoiceChat] Failed to create annotation:', e)
-      } finally {
-        setStatus('idle')
-      }
-    }
-
-    createEntry()
-  }, [status, transcript, onEntryCreated])
 
   // ── Avvia chiamata ─────────────────────────────────────────
   const startCall = async () => {
