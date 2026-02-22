@@ -691,7 +691,7 @@ export async function generateAnnotationFromVoiceChat(conversation) {
 
 ${conversationText}
 ${userContextBlock}
-Scrivi un'annotazione di diario in prima persona, esattamente come se fosse l'utente a scriverla nel suo journal personale. 
+Scrivi un'annotazione di diario in prima persona, esattamente come se fosse l'utente a scriverla nel suo journal personale.
 Regole:
 - Prima persona ("Ho preso...", "Mi sento...", "Sto...")
 - Linguaggio naturale e scorrevole, NON burocratico
@@ -699,13 +699,16 @@ Regole:
 - 2-4 frasi, concise ma complete
 - NON iniziare con "Oggi", "Questo pomeriggio", "In questo momento" — inizia direttamente col contenuto
 - NON aggiungere interpretazioni o consigli — solo ciò che l'utente ha detto
-- Stessa lingua dell'utente (italiano)
+- Stessa lingua dell'utente
 
-Rispondi con JSON: {"annotation": "testo annotazione"}`
+Rispondi con SOLO il testo dell'annotazione, senza JSON, senza virgolette, senza prefissi.`
 
   try {
-    const result = await callGemini(prompt, { maxOutputTokens: 512, temperature: 0.3, retries: 1 })
-    return result?.annotation || null
+    const result = await callGemini(prompt, { maxOutputTokens: 512, temperature: 0.3, retries: 1, jsonMode: false })
+    if (!result || typeof result !== 'string' || !result.trim()) return null
+    // Strip any accidental JSON wrapper or quotes
+    const text = result.trim().replace(/^["']|["']$/g, '').replace(/^\{.*?"annotation"\s*:\s*"(.+)"\s*\}$/s, '$1')
+    return text || null
   } catch (e) {
     console.warn('Failed to generate annotation from voice chat:', e)
     return null
