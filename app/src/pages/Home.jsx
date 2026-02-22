@@ -3,7 +3,10 @@ import { useNavigate, NavLink } from 'react-router-dom'
 import { useApp } from '../lib/store'
 import { BarChart3, Bell, Sparkles, ChevronDown, SendHorizontal, RefreshCw } from 'lucide-react'
 import EntryDetailModal from '../components/EntryDetailModal'
+import VoiceChat from '../components/VoiceChat'
 import { generatePlaceholderHints } from '../lib/gemini'
+
+const VAPI_PUBLIC_KEY = import.meta.env.VITE_VAPI_PUBLIC_KEY
 
 function nowDate() { return new Date().toISOString().slice(0, 10) }
 function nowTime() { return new Date().toTimeString().slice(0, 5) }
@@ -202,6 +205,24 @@ export default function Home() {
     if (!modal) return
     await deleteEntry(modal.id)
     setModal(null); setModalClosing(false)
+  }
+
+  // Handle entry created by voice chat
+  const handleVoiceEntry = async (voiceText) => {
+    if (!voiceText?.trim()) return
+    await addEntry({ text: voiceText.trim(), date: nowDate(), time: nowTime() })
+    // Refresh hints after voice entry
+    setHintsVisible(false)
+    generatePlaceholderHints([...entries, { text: voiceText, entry_date: nowDate(), entry_time: nowTime() }]).then(h => {
+      if (h && h.length > 0) {
+        setHints(h)
+        try {
+          localStorage.setItem('clarity_hints', JSON.stringify(h))
+          localStorage.setItem('clarity_hints_ts', Date.now().toString())
+        } catch {}
+        requestAnimationFrame(() => setHintsVisible(true))
+      }
+    })
   }
 
   // Auto-scroll to bottom on new entry
@@ -433,6 +454,12 @@ export default function Home() {
               </button>
             </div>
           </div>
+
+          <VoiceChat
+            vapiPublicKey={VAPI_PUBLIC_KEY}
+            onEntryCreated={handleVoiceEntry}
+            hints={hints}
+          />
 
           <NavLink to="/app/alerts" className="bottom-nav-btn glass" title="Alerts" style={{ position: 'relative' }}>
             <Bell size={22} />
