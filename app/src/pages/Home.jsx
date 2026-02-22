@@ -48,7 +48,7 @@ function formatDatePill(dateStr) {
 
 export default function Home() {
   const navigate = useNavigate()
-  const { user, entries, entriesLoading, entriesError, addEntry, updateEntry, deleteEntry } = useApp()
+  const { user, entries, entriesLoading, addEntry, updateEntry, deleteEntry } = useApp()
   const showAlertsBadge = useAlertsBadge(entries)
   const [text, setText] = useState('')
   const [time, setTime] = useState(nowTime())
@@ -324,12 +324,6 @@ export default function Home() {
             Write about your day — how you feel, what you did, what you took. Clarity finds patterns in your mood, energy, and habits.
           </p>
           <ChevronDown size={20} style={{ color: 'var(--amber)', animation: 'floatDown 1.5s ease-in-out infinite' }} />
-          {/* DEBUG — remove after diagnosis */}
-          <div style={{ marginTop: 20, padding: '10px 14px', background: 'rgba(0,0,0,0.06)', borderRadius: 10, fontSize: '0.72rem', color: 'var(--text-muted)', fontFamily: 'monospace', textAlign: 'left', maxWidth: 300, wordBreak: 'break-all' }}>
-            <div>uid: {user?.id?.slice(0,16)}…</div>
-            <div>email: {user?.email}</div>
-            {entriesError && <div style={{ color: '#e74c3c', marginTop: 4 }}>err: {entriesError}</div>}
-          </div>
         </div>
       )}
 
