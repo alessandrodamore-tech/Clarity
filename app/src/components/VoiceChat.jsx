@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react'
 import Vapi from '@vapi-ai/web'
 import { generateAnnotationFromVoiceChat } from '../lib/gemini'
 
-// ─── Icona waveform (5 barre equalizer) ──────────────────
+// ─── Icona waveform (bottone) ─────────────────────────────
 const VoiceWaveIcon = ({ animated = false }) => (
   <svg width="20" height="16" viewBox="0 0 20 16" fill="currentColor" style={{ display: 'block' }}>
     <rect x="0" y="5" width="2.5" height="6" rx="1.25"
@@ -18,6 +18,37 @@ const VoiceWaveIcon = ({ animated = false }) => (
   </svg>
 )
 
+// ─── Waveform animata grande (per l'overlay) ──────────────
+const BigWaveIcon = ({ status }) => {
+  const colors = {
+    listening: '#4CAF50',
+    speaking: '#9c88ff',
+    thinking: '#E8A838',
+    connecting: '#E8A838',
+  }
+  const color = colors[status] || '#aaa'
+  const animated = ['listening', 'speaking', 'thinking'].includes(status)
+  return (
+    <svg width="48" height="32" viewBox="0 0 48 32" fill={color} style={{ display: 'block' }}>
+      {[0,8,16,24,32,40].map((x, i) => {
+        const heights = [12, 24, 32, 28, 20, 14]
+        const h = heights[i]
+        const y = (32 - h) / 2
+        const delays = [0, 0.1, 0.2, 0.15, 0.05, 0.12]
+        return (
+          <rect key={i} x={x} y={y} width="5" height={h} rx="2.5"
+            style={animated ? {
+              animation: `waveBar${(i % 3) + 1} ${0.6 + i * 0.05}s ease-in-out infinite`,
+              animationDelay: `${delays[i]}s`,
+              transformOrigin: `${x + 2.5}px 16px`,
+            } : undefined}
+          />
+        )
+      })}
+    </svg>
+  )
+}
+
 // ─── Componente principale ────────────────────────────────
 export default function VoiceChat({
   vapiPublicKey,
@@ -27,17 +58,26 @@ export default function VoiceChat({
   userContext = '',
   hideWhenText = false,
 }) {
-  const [status, setStatus] = useState('idle') // idle | connecting | listening | thinking | speaking | ending
+  const [status, setStatus] = useState('idle')
+  const [showModal, setShowModal] = useState(false)
+  const [messages, setMessages] = useState([]) // [{role, content, id}]
   const [error, setError] = useState(null)
+  const [modalClosing, setModalClosing] = useState(false)
 
   const vapiRef = useRef(null)
   const hasCreatedEntry = useRef(false)
   const callEndedNaturally = useRef(false)
   const transcriptRef = useRef([])
   const onEntryCreatedRef = useRef(onEntryCreated)
+  const messagesEndRef = useRef(null)
   useEffect(() => { onEntryCreatedRef.current = onEntryCreated }, [onEntryCreated])
 
-  // ── Inizializza Vapi (una sola istanza) ───────────────────
+  // Auto-scroll alla fine dei messaggi
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages])
+
+  // ── Inizializza Vapi ───────────────────────────────────────
   const getVapi = () => {
     if (vapiRef.current) return vapiRef.current
     if (!vapiPublicKey) return null
@@ -47,20 +87,24 @@ export default function VoiceChat({
     vapi.on('call-start', () => {
       setStatus('listening')
       setError(null)
+      setMessages([])
       transcriptRef.current = []
       hasCreatedEntry.current = false
       callEndedNaturally.current = false
     })
 
-    vapi.on('speech-start', () => setStatus('speaking'))
+    vapi.on('speech-start', () => {
+      // Detect who's speaking based on recent context (Vapi emits for both)
+      setStatus('speaking')
+    })
+
     vapi.on('speech-end', () => setStatus('listening'))
 
     vapi.on('message', (msg) => {
       if (msg.type === 'transcript' && msg.transcriptType === 'final') {
-        transcriptRef.current = [...transcriptRef.current, {
-          role: msg.role,
-          content: msg.transcript,
-        }]
+        const entry = { role: msg.role, content: msg.transcript }
+        transcriptRef.current = [...transcriptRef.current, entry]
+        setMessages(prev => [...prev, { ...entry, id: Date.now() + Math.random() }])
       }
       if (msg.type === 'model-output') setStatus('thinking')
     })
@@ -77,16 +121,20 @@ export default function VoiceChat({
             if (annotation && onEntryCreatedRef.current) onEntryCreatedRef.current(annotation)
           })
           .catch(e => console.error('[VoiceChat] Annotation failed:', e))
-          .finally(() => setStatus('idle'))
+          .finally(() => {
+            setStatus('idle')
+            closeModal()
+          })
       } else {
         setStatus('idle')
+        closeModal()
       }
     })
 
     vapi.on('error', (err) => {
       if (callEndedNaturally.current) return
-      console.error('[VoiceChat] Vapi error:', err)
-      setError('Connection error. Please try again.')
+      console.error('[VoiceChat] error:', err)
+      setError('Connection error. Try again.')
       setStatus('idle')
     })
 
@@ -94,23 +142,23 @@ export default function VoiceChat({
     return vapi
   }
 
-  // ── Avvia chiamata con assistant ID + overrides ────────────
+  // ── Apri modal e avvia chiamata ────────────────────────────
   const startCall = async () => {
     if (!vapiPublicKey || !assistantId) {
       setError('Vapi not configured.')
       return
     }
+    setShowModal(true)
+    setModalClosing(false)
+    setMessages([])
+    setError(null)
+
     try {
       setStatus('connecting')
-      setError(null)
       const vapi = getVapi()
-
-      // Hint chips as readable string
       const hintsText = hints.length > 0
         ? hints.slice(0, 5).map(h => `- ${h.text || h}`).join('\n')
         : ''
-
-      // Start with assistant ID + dynamic variable overrides
       await vapi.start(assistantId, {
         variableValues: {
           userContext: userContext || '',
@@ -119,7 +167,7 @@ export default function VoiceChat({
       })
     } catch (err) {
       console.error('[VoiceChat] Failed to start:', err)
-      setError('Could not start voice chat. Check microphone permissions.')
+      setError('Could not start. Check microphone permissions.')
       setStatus('idle')
     }
   }
@@ -129,6 +177,15 @@ export default function VoiceChat({
     callEndedNaturally.current = true
     try { vapiRef.current?.stop() } catch {}
     setStatus('ending')
+  }
+
+  // ── Chiudi modal con animazione ────────────────────────────
+  const closeModal = () => {
+    setModalClosing(true)
+    setTimeout(() => {
+      setShowModal(false)
+      setModalClosing(false)
+    }, 350)
   }
 
   // ── Cleanup al unmount ──────────────────────────────────────
@@ -141,123 +198,260 @@ export default function VoiceChat({
     }
   }, [])
 
-  // ── Stato UI ───────────────────────────────────────────────
-  const statusColor = {
-    idle: 'var(--text-light)',
-    connecting: 'var(--amber)',
-    listening: '#4CAF50',
-    thinking: 'var(--amber)',
-    speaking: '#9c88ff',
-    ending: 'var(--amber)',
+  const isActive = ['connecting', 'listening', 'thinking', 'speaking'].includes(status)
+  const isEnding = status === 'ending'
+  const hidden = hideWhenText && !isActive && !showModal
+
+  const statusLabel = {
+    connecting: 'Connecting...',
+    listening: 'Listening...',
+    thinking: 'Thinking...',
+    speaking: 'Speaking...',
+    ending: 'Creating annotation...',
+    idle: '',
   }
 
-  const isActive = ['connecting', 'listening', 'thinking', 'speaking'].includes(status)
-  const isLoading = status === 'connecting' || status === 'ending'
-  const color = statusColor[status] || statusColor.idle
-  const hidden = hideWhenText && !isActive
+  const statusColor = {
+    listening: '#4CAF50',
+    speaking: '#9c88ff',
+    thinking: '#E8A838',
+    connecting: '#E8A838',
+    ending: '#E8A838',
+  }
+  const color = statusColor[status] || 'var(--text-light)'
 
   return (
-    <div style={{
-      position: 'relative',
-      display: 'flex',
-      alignItems: 'center',
-      opacity: hidden ? 0 : 1,
-      pointerEvents: hidden ? 'none' : 'auto',
-      transition: 'opacity 0.2s ease',
-      flexShrink: 0,
-    }}>
-      {/* Tooltip errore */}
-      {error && (
-        <div style={{
-          position: 'absolute',
-          bottom: 'calc(100% + 10px)',
-          right: 0,
-          background: 'rgba(220, 80, 80, 0.92)',
-          backdropFilter: 'blur(12px)',
-          color: '#fff',
-          padding: '8px 14px',
-          borderRadius: 12,
-          fontSize: '0.75rem',
-          maxWidth: 240,
-          whiteSpace: 'normal',
-          textAlign: 'center',
-          zIndex: 100,
-          boxShadow: '0 4px 16px rgba(0,0,0,0.15)',
-          lineHeight: 1.4,
-        }}>
-          {error}
-          <button
-            onClick={() => setError(null)}
-            style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.7)', cursor: 'pointer', marginLeft: 8, fontSize: '0.8rem' }}
-          >✕</button>
-        </div>
-      )}
+    <>
+      {/* ── Bottone nella input bar ── */}
+      <div style={{
+        position: 'relative',
+        display: 'flex',
+        alignItems: 'center',
+        opacity: hidden ? 0 : 1,
+        pointerEvents: hidden ? 'none' : 'auto',
+        transition: 'opacity 0.2s ease',
+        flexShrink: 0,
+      }}>
+        <button
+          onClick={isActive || showModal ? stopCall : startCall}
+          disabled={isEnding}
+          title={isActive ? 'End voice chat' : 'Talk to Clarity'}
+          style={{
+            width: 36, height: 36,
+            borderRadius: 12,
+            cursor: isEnding ? 'wait' : 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            color: isActive ? '#fff' : 'var(--text-light)',
+            background: isActive ? `linear-gradient(135deg, ${color}dd, ${color}99)` : 'transparent',
+            border: isActive ? `1px solid ${color}55` : '1px solid transparent',
+            boxShadow: isActive ? `0 0 0 3px ${color}20, 0 4px 12px ${color}30` : 'none',
+            transition: 'all 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
+            padding: 0,
+          }}
+        >
+          {isEnding ? (
+            <span style={{
+              width: 16, height: 16,
+              border: `2px solid ${color}44`,
+              borderTop: `2px solid ${color}`,
+              borderRadius: '50%',
+              animation: 'spin 0.8s linear infinite',
+              display: 'block',
+            }} />
+          ) : (
+            <VoiceWaveIcon animated={isActive} />
+          )}
+        </button>
+      </div>
 
-      {/* Tooltip "ending" */}
-      {status === 'ending' && (
+      {/* ── Modal overlay ── */}
+      {showModal && (
         <div style={{
-          position: 'absolute',
-          bottom: 'calc(100% + 10px)',
-          right: 0,
-          background: 'rgba(255,255,255,0.85)',
-          backdropFilter: 'blur(12px)',
-          color: 'var(--text)',
-          padding: '8px 14px',
-          borderRadius: 12,
-          fontSize: '0.75rem',
-          whiteSpace: 'nowrap',
-          zIndex: 100,
-          boxShadow: '0 4px 16px rgba(0,0,0,0.1)',
-        }}>
-          ✍️ Creating annotation...
-        </div>
-      )}
-
-      {/* Bottone */}
-      <button
-        onClick={isActive ? stopCall : startCall}
-        disabled={isLoading}
-        title={isActive ? 'End voice chat' : 'Talk to Clarity'}
-        style={{
-          width: 36,
-          height: 36,
-          borderRadius: 12,
-          cursor: isLoading ? 'wait' : 'pointer',
+          position: 'fixed',
+          inset: 0,
+          zIndex: 1000,
           display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          color: isActive ? '#fff' : 'var(--text-light)',
-          background: isActive
-            ? `linear-gradient(135deg, ${color}dd, ${color}99)`
-            : 'transparent',
-          border: isActive ? `1px solid ${color}55` : '1px solid transparent',
-          boxShadow: isActive
-            ? `0 0 0 3px ${color}20, 0 4px 12px ${color}30`
-            : 'none',
-          transition: 'all 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
-          padding: 0,
+          flexDirection: 'column',
+          justifyContent: 'flex-end',
+          background: 'rgba(0,0,0,0.35)',
+          backdropFilter: 'blur(8px)',
+          WebkitBackdropFilter: 'blur(8px)',
+          animation: modalClosing ? 'fadeOut 0.35s ease forwards' : 'fadeIn 0.25s ease',
         }}
-      >
-        {isLoading ? (
-          <span style={{
-            width: 16, height: 16,
-            border: `2px solid ${color}44`,
-            borderTop: `2px solid ${color}`,
-            borderRadius: '50%',
-            animation: 'spin 0.8s linear infinite',
-            display: 'block',
-          }} />
-        ) : (
-          <VoiceWaveIcon animated={isActive} />
-        )}
-      </button>
+          onClick={e => { if (e.target === e.currentTarget && !isActive) closeModal() }}
+        >
+          <div style={{
+            background: 'rgba(255,255,255,0.92)',
+            backdropFilter: 'blur(40px) saturate(200%)',
+            WebkitBackdropFilter: 'blur(40px) saturate(200%)',
+            borderRadius: '28px 28px 0 0',
+            padding: '0 0 env(safe-area-inset-bottom, 20px)',
+            maxHeight: '75vh',
+            display: 'flex',
+            flexDirection: 'column',
+            animation: modalClosing ? 'slideDown 0.35s cubic-bezier(0.16,1,0.3,1) forwards' : 'slideUp 0.4s cubic-bezier(0.16,1,0.3,1)',
+            boxShadow: '0 -8px 40px rgba(0,0,0,0.15)',
+          }}>
+            {/* Header */}
+            <div style={{
+              padding: '20px 24px 16px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              borderBottom: '1px solid rgba(0,0,0,0.06)',
+              flexShrink: 0,
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{
+                  width: 8, height: 8, borderRadius: '50%',
+                  background: color,
+                  boxShadow: isActive ? `0 0 8px ${color}` : 'none',
+                  animation: status === 'listening' ? 'pulse 1.5s ease-in-out infinite' : 'none',
+                }} />
+                <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '1rem', color: 'var(--navy)' }}>
+                  Clarity
+                </span>
+                <span style={{ fontSize: '0.78rem', color: 'var(--text-light)', marginLeft: 4 }}>
+                  {statusLabel[status]}
+                </span>
+              </div>
+
+              {/* Waveform / status */}
+              <BigWaveIcon status={status} />
+            </div>
+
+            {/* Transcript */}
+            <div style={{
+              flex: 1,
+              overflowY: 'auto',
+              padding: '16px 20px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 10,
+              minHeight: 120,
+            }}>
+              {messages.length === 0 && (
+                <p style={{
+                  textAlign: 'center',
+                  color: 'var(--text-light)',
+                  fontSize: '0.85rem',
+                  margin: 'auto',
+                  opacity: 0.7,
+                }}>
+                  {status === 'connecting' ? 'Connecting...' : 'Start speaking...'}
+                </p>
+              )}
+
+              {messages.map(msg => (
+                <div
+                  key={msg.id}
+                  style={{
+                    display: 'flex',
+                    justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start',
+                    animation: 'fadeInUp 0.25s ease',
+                  }}
+                >
+                  <div style={{
+                    maxWidth: '80%',
+                    padding: '10px 14px',
+                    borderRadius: msg.role === 'user' ? '18px 18px 4px 18px' : '18px 18px 18px 4px',
+                    background: msg.role === 'user'
+                      ? 'linear-gradient(135deg, #667eea, #764ba2)'
+                      : 'rgba(0,0,0,0.07)',
+                    color: msg.role === 'user' ? '#fff' : 'var(--text)',
+                    fontSize: '0.88rem',
+                    lineHeight: 1.5,
+                    boxShadow: msg.role === 'user' ? '0 2px 8px rgba(102,126,234,0.3)' : 'none',
+                  }}>
+                    {msg.content}
+                  </div>
+                </div>
+              ))}
+
+              {/* Ending state */}
+              {isEnding && (
+                <div style={{ display: 'flex', justifyContent: 'flex-start', animation: 'fadeInUp 0.25s ease' }}>
+                  <div style={{
+                    padding: '10px 14px',
+                    borderRadius: '18px 18px 18px 4px',
+                    background: 'rgba(232,168,56,0.12)',
+                    color: 'var(--amber)',
+                    fontSize: '0.85rem',
+                    fontWeight: 500,
+                  }}>
+                    ✍️ Creating annotation...
+                  </div>
+                </div>
+              )}
+
+              {/* Error */}
+              {error && (
+                <div style={{
+                  padding: '10px 14px', borderRadius: 12,
+                  background: 'rgba(220,80,80,0.1)', color: '#c0392b',
+                  fontSize: '0.82rem', textAlign: 'center',
+                }}>
+                  {error}
+                </div>
+              )}
+
+              <div ref={messagesEndRef} />
+            </div>
+
+            {/* Footer — stop button */}
+            <div style={{
+              padding: '16px 24px 20px',
+              display: 'flex',
+              justifyContent: 'center',
+              flexShrink: 0,
+              borderTop: '1px solid rgba(0,0,0,0.06)',
+            }}>
+              <button
+                onClick={stopCall}
+                disabled={isEnding}
+                style={{
+                  width: 56, height: 56,
+                  borderRadius: '50%',
+                  background: isEnding ? 'rgba(0,0,0,0.08)' : 'rgba(220,80,80,0.12)',
+                  border: 'none',
+                  cursor: isEnding ? 'wait' : 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  transition: 'all 0.2s ease',
+                  color: isEnding ? 'var(--text-light)' : '#c0392b',
+                }}
+              >
+                {isEnding ? (
+                  <span style={{
+                    width: 20, height: 20,
+                    border: '2px solid rgba(0,0,0,0.15)',
+                    borderTop: '2px solid var(--amber)',
+                    borderRadius: '50%',
+                    animation: 'spin 0.8s linear infinite',
+                    display: 'block',
+                  }} />
+                ) : (
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                    <rect x="4" y="4" width="16" height="16" rx="3"/>
+                  </svg>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <style>{`
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
         @keyframes waveBar1 { 0%,100% { transform: scaleY(1); } 50% { transform: scaleY(0.35); } }
         @keyframes waveBar2 { 0%,100% { transform: scaleY(1); } 50% { transform: scaleY(0.55); } }
         @keyframes waveBar3 { 0%,100% { transform: scaleY(1); } 50% { transform: scaleY(0.25); } }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes fadeOut { from { opacity: 1; } to { opacity: 0; } }
+        @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+        @keyframes slideDown { from { transform: translateY(0); } to { transform: translateY(100%); } }
+        @keyframes fadeInUp { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes pulse { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.5; transform: scale(1.3); } }
       `}</style>
-    </div>
+    </>
   )
 }
