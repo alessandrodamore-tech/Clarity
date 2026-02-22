@@ -251,7 +251,7 @@ Re-scans all entries and finds health signals that were overlooked.
 - **No Notion token on server** — token stored in user's localStorage, sent per-request to proxy
 
 ### Sync Behavior
-- **Clarity → Notion**: automatic. Every new entry auto-pushes via `autoSyncEntry()` (fire-and-forget in `store.jsx`, 1.5s delay to ensure credentials are hydrated)
+- **Clarity → Notion**: automatic. Every new entry auto-pushes via `autoSyncEntry()` (fire-and-forget in `store.jsx`, uses `waitForNotionCredentials()` retry loop instead of hardcoded delay)
 - **Notion → Clarity**: automatic on app load (once per session via `useRef`), plus manual pull in Settings
 - **Dedup**: text-based (case-insensitive trim comparison) + sync map (clarity_id → notion_page_id) + within-pull dedup
 - **Delete**: deleting entry from Clarity does NOT delete from Notion (Notion acts as backup)
@@ -315,6 +315,11 @@ Re-scans all entries and finds health signals that were overlooked.
 - [x] ~~Thinking model JSON fix~~ — DONE in v0.3.2 (filter thought parts, extract JSON from preamble)
 - [x] ~~`entries_source_check` constraint only accepts 'manual'~~ — DONE in v0.4 (constraint updated to accept 'manual', 'import', 'notion')
 - [x] ~~`user_reminders` table may not exist on Supabase~~ — DONE in v0.3 (table exists, cross-device persistence works)
+- [x] ~~Textarea overflow on long messages~~ — DONE in v0.6 (`max-height: 120px; overflow-y: auto` on `.feed-input`)
+- [x] ~~Safari bottom whitespace~~ — DONE in v0.6 (replaced all `100vh` → `100dvh` throughout CSS + JSX files)
+- [x] ~~Notion sync map not cross-device~~ — DONE in v0.6 (`saveSyncMap` now persists to Supabase `user_metadata.notion_sync_map`, merged on load via `loadNotionSyncMapFromUser`)
+- [x] ~~Notion credentials race condition~~ — DONE in v0.6 (`waitForNotionCredentials()` retry loop with exponential backoff replaces hardcoded 1.5s delay)
+- [ ] Safari bottom toolbar (URL bar above keyboard) — native Safari behavior in browser mode, not fixable via CSS. Workaround: add to home screen as PWA
 - [ ] Rate limiting for "Analyze all" — some days fail with 429
 - [ ] Push notifications for reminders (requires service worker + VAPID keys — currently browser-only via Notification API)
 
