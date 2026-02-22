@@ -1,10 +1,14 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react'
+import React, { useState, useEffect, useRef, useMemo, Suspense } from 'react'
 import { useNavigate, NavLink } from 'react-router-dom'
 import { useApp } from '../lib/store'
 import { BarChart3, Bell, Sparkles, ChevronDown, SendHorizontal, RefreshCw } from 'lucide-react'
 import EntryDetailModal from '../components/EntryDetailModal'
-import VoiceChat from '../components/VoiceChat'
 import { generatePlaceholderHints } from '../lib/gemini'
+
+// Lazy-load VoiceChat to prevent @daily-co/daily-js from crashing on iOS Safari at startup
+const VoiceChat = React.lazy(() =>
+  import('../components/VoiceChat').catch(() => ({ default: () => null }))
+)
 
 const VAPI_PUBLIC_KEY = import.meta.env.VITE_VAPI_PUBLIC_KEY
 const VAPI_ASSISTANT_ID = import.meta.env.VITE_VAPI_ASSISTANT_ID
@@ -462,15 +466,17 @@ export default function Home() {
               >
                 <SendHorizontal size={16} />
               </button>
-              {/* Voice chat — appare quando non c'è testo */}
-              <VoiceChat
-                vapiPublicKey={VAPI_PUBLIC_KEY}
-                assistantId={VAPI_ASSISTANT_ID}
-                onEntryCreated={handleVoiceEntry}
-                hints={hints}
-                userContext={(() => { try { return localStorage.getItem(USER_CONTEXT_KEY) || '' } catch { return '' } })()}
-                hideWhenText={Boolean(text.trim())}
-              />
+              {/* Voice chat — lazy-loaded to prevent iOS Safari crash from @daily-co/daily-js */}
+              <Suspense fallback={null}>
+                <VoiceChat
+                  vapiPublicKey={VAPI_PUBLIC_KEY}
+                  assistantId={VAPI_ASSISTANT_ID}
+                  onEntryCreated={handleVoiceEntry}
+                  hints={hints}
+                  userContext={(() => { try { return localStorage.getItem(USER_CONTEXT_KEY) || '' } catch { return '' } })()}
+                  hideWhenText={Boolean(text.trim())}
+                />
+              </Suspense>
             </div>
           </div>
 
