@@ -11,25 +11,33 @@ export function AppProvider({ children }) {
   const [entriesLoading, setEntriesLoading] = useState(false)
   const [entriesError, setEntriesError] = useState(null)
 
-  // Auth
+  // Auth — initialize once, set user only after fresh data is ready
   useEffect(() => {
     supabase.auth.getSession().then(async ({ data: { session } }) => {
-      const u = session?.user ?? null
-      setUser(u)
-      setLoading(false)
-      // Fetch fresh user metadata from server (session JWT may have stale metadata)
-      if (u) {
-        loadNotionCredentialsFromUser(u) // use cached first for speed
-        loadNotionSyncMapFromUser(u) // hydrate sync map from Supabase source of truth
+      const sessionUser = session?.user ?? null
+
+      if (sessionUser) {
+        // Load Notion creds from cached session first (fast)
+        loadNotionCredentialsFromUser(sessionUser)
+        loadNotionSyncMapFromUser(sessionUser)
+
+        // Fetch fresh user metadata (has up-to-date user_metadata like ai_context)
         try {
           const { data } = await supabase.auth.getUser()
           if (data?.user) {
-            setUser(data.user)
             loadNotionCredentialsFromUser(data.user)
-            loadNotionSyncMapFromUser(data.user) // fresh metadata wins over session JWT cache
+            loadNotionSyncMapFromUser(data.user)
+            setUser(data.user) // set user ONCE with fresh data → triggers fetchEntries once
+          } else {
+            setUser(sessionUser) // fallback
           }
-        } catch {}
+        } catch {
+          setUser(sessionUser) // fallback on network error
+        }
+      } else {
+        setUser(null)
       }
+      setLoading(false)
     })
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
@@ -39,17 +47,25 @@ export function AppProvider({ children }) {
     return () => subscription.unsubscribe()
   }, [])
 
-  // Fetch entries when user changes
+  // Fetch entries when user changes (with retry for Safari AbortError)
   const fetchEntries = useCallback(async () => {
     if (!user) { setEntries([]); return }
     setEntriesLoading(true)
-    const { data, error } = await supabase
-      .from('entries')
-      .select('*')
-      .eq('user_id', user.id)
-      .order('entry_date', { ascending: false })
-      .order('entry_time', { ascending: false })
-    
+
+    let data = null, error = null
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (attempt > 0) await new Promise(r => setTimeout(r, 400 * attempt))
+      const res = await supabase
+        .from('entries')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('entry_date', { ascending: false })
+        .order('entry_time', { ascending: false })
+      data = res.data; error = res.error
+      if (!error || error.name !== 'AbortError') break
+      console.warn(`[Clarity] fetchEntries attempt ${attempt + 1} aborted, retrying...`)
+    }
+
     if (error) {
       console.error('[Clarity] fetchEntries error:', error)
       setEntriesError(error.message || JSON.stringify(error))
