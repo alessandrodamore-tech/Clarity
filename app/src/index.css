@@ -736,10 +736,16 @@ body {
   outline: none;
   resize: none;
   min-height: 24px;
+  max-height: 120px;
+  overflow-y: auto;
+  scrollbar-width: none;
   field-sizing: content;
 }
 .feed-input::placeholder {
   color: var(--text-light);
+}
+.feed-input::-webkit-scrollbar {
+  display: none;
 }
 
 /* Smart hint chips — horizontal scroll above input */
