@@ -9,6 +9,7 @@ export function AppProvider({ children }) {
   const [loading, setLoading] = useState(true)
   const [entries, setEntries] = useState([])
   const [entriesLoading, setEntriesLoading] = useState(false)
+  const [entriesError, setEntriesError] = useState(null)
 
   // Auth
   useEffect(() => {
@@ -49,7 +50,11 @@ export function AppProvider({ children }) {
       .order('entry_date', { ascending: false })
       .order('entry_time', { ascending: false })
     
-    if (!error && data) {
+    if (error) {
+      console.error('[Clarity] fetchEntries error:', error)
+      setEntriesError(error.message || JSON.stringify(error))
+    } else if (data) {
+      setEntriesError(null)
       setEntries(data.map(e => ({
         id: e.id,
         text: e.raw_text,
@@ -180,7 +185,7 @@ export function AppProvider({ children }) {
   }
 
   return (
-    <AppContext.Provider value={{ user, loading, entries, entriesLoading, addEntry, updateEntry, deleteEntry, fetchEntries, setUser, insightsData, setInsightsData: setInsightsDataPersisted }}>
+    <AppContext.Provider value={{ user, loading, entries, entriesLoading, entriesError, addEntry, updateEntry, deleteEntry, fetchEntries, setUser, insightsData, setInsightsData: setInsightsDataPersisted }}>
       {children}
     </AppContext.Provider>
   )
