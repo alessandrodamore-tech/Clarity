@@ -15,7 +15,7 @@ export default class ErrorBoundary extends Component {
     if (this.state.hasError) {
       return (
         <div style={{
-          minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
+          minHeight: '100dvh', display: 'flex', alignItems: 'center', justifyContent: 'center',
           padding: 24, textAlign: 'center',
         }}>
           <div className="bg-mesh" />

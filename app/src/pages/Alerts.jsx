@@ -84,17 +84,24 @@ function migrateFromReminders() {
   } catch { return null }
 }
 
-// Atomic upsert to Supabase
-function upsertAlertsToSupabase(userId) {
+// Atomic upsert to Supabase — always includes ALL fields to prevent partial overwrites
+function upsertAlertsToSupabase(userId, {
+  reminders_data,
+  done_items,
+  processed_ids,
+  entries_hash,
+} = {}) {
   if (!userId) return
-  supabase.from('user_reminders').upsert({
+  // Resolve each field: prefer explicitly passed value, fall back to current localStorage state
+  const payload = {
     user_id: userId,
-    reminders_data: loadCachedAlerts() || {},
-    done_items: [...loadDismissedSet()],
-    processed_ids: [...loadProcessedIds()],
-    entries_hash: localStorage.getItem(HASH_KEY) || '',
+    reminders_data: reminders_data !== undefined ? reminders_data : (loadCachedAlerts() || {}),
+    done_items: done_items !== undefined ? [...done_items] : [...loadDismissedSet()],
+    processed_ids: processed_ids !== undefined ? [...processed_ids] : [...loadProcessedIds()],
+    entries_hash: entries_hash !== undefined ? entries_hash : (localStorage.getItem(HASH_KEY) || ''),
     updated_at: new Date().toISOString(),
-  }, { onConflict: 'user_id' }).then(({ error }) => {
+  }
+  supabase.from('user_reminders').upsert(payload, { onConflict: 'user_id' }).then(({ error }) => {
     if (error) console.warn('Failed to save alerts to Supabase:', error)
   })
 }
@@ -105,7 +112,7 @@ function saveCachedAlerts(data, hash, userId) {
     localStorage.setItem(HASH_KEY, hash)
     localStorage.setItem(SEEN_KEY, Date.now().toString())
   } catch {}
-  upsertAlertsToSupabase(userId)
+  upsertAlertsToSupabase(userId, { reminders_data: data, entries_hash: hash })
 }
 
 function loadDismissedSet() {
@@ -114,7 +121,7 @@ function loadDismissedSet() {
 
 function saveDismissedSet(set, userId) {
   try { localStorage.setItem(DISMISSED_KEY, JSON.stringify([...set])) } catch {}
-  upsertAlertsToSupabase(userId)
+  upsertAlertsToSupabase(userId, { done_items: set })
 }
 
 function loadProcessedIds() {
@@ -123,7 +130,7 @@ function loadProcessedIds() {
 
 function saveProcessedIds(ids, userId) {
   try { localStorage.setItem(PROCESSED_IDS_KEY, JSON.stringify([...ids])) } catch {}
-  upsertAlertsToSupabase(userId)
+  upsertAlertsToSupabase(userId, { processed_ids: ids })
 }
 
 // ─── NOTIFICATIONS (only high severity warning/medication) ─

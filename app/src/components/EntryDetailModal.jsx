@@ -46,7 +46,7 @@ export default function EntryDetailModal({
       }} />
       <div onClick={e => e.stopPropagation()} style={{
         position: 'relative', zIndex: 1, width: '100%', maxWidth: 480,
-        maxHeight: 'calc(100vh - 140px)', overflowY: 'auto',
+        maxHeight: 'calc(100dvh - 140px)', overflowY: 'auto',
         background: 'rgba(255,255,255,0.92)', borderRadius: 20, padding: 24,
         paddingBottom: 'max(24px, env(safe-area-inset-bottom))',
         boxShadow: '0 20px 60px rgba(0,0,0,0.15)', '--from-transform': fromTransform,

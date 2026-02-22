@@ -26,7 +26,8 @@ export async function clearNotionCredentials() {
     localStorage.removeItem('clarity_notion_creds')
     localStorage.removeItem(SYNC_MAP_KEY)
   } catch {}
-  await supabase.auth.updateUser({ data: { notion_creds: null } })
+  // Clear both Notion credentials and sync map from Supabase user_metadata
+  await supabase.auth.updateUser({ data: { notion_creds: null, notion_sync_map: null } })
 }
 
 // Load credentials from Supabase user metadata into localStorage cache
@@ -40,12 +41,32 @@ export function loadNotionCredentialsFromUser(user) {
 }
 
 // ─── SYNC MAP (clarity_id → notion_page_id) ─────────────
+// localStorage = fast local cache; Supabase user_metadata = cross-device source of truth
+
 function loadSyncMap() {
   try { return JSON.parse(localStorage.getItem(SYNC_MAP_KEY) || '{}') } catch { return {} }
 }
 
 function saveSyncMap(map) {
+  // 1. Update localStorage cache immediately (synchronous, instant)
   try { localStorage.setItem(SYNC_MAP_KEY, JSON.stringify(map)) } catch {}
+  // 2. Persist to Supabase user_metadata (async, cross-device, fire-and-forget)
+  supabase.auth.updateUser({ data: { notion_sync_map: map } }).then(({ error }) => {
+    if (error) console.warn('Failed to persist notion sync map to Supabase:', error)
+  })
+}
+
+// Call on app startup (when user is loaded) to hydrate localStorage from Supabase source of truth
+export function loadNotionSyncMapFromUser(user) {
+  const remoteMap = user?.user_metadata?.notion_sync_map
+  if (remoteMap && typeof remoteMap === 'object') {
+    // Merge remote (source of truth) into local cache
+    const localMap = loadSyncMap()
+    const merged = { ...localMap, ...remoteMap }
+    try { localStorage.setItem(SYNC_MAP_KEY, JSON.stringify(merged)) } catch {}
+    return merged
+  }
+  return null
 }
 
 // ─── PROXY CALL ──────────────────────────────────────────
@@ -107,12 +128,25 @@ export async function pushToNotion(token, databaseId, entries, onProgress) {
   return { pushed, total: toSync.length, alreadySynced: entries.length - toSync.length }
 }
 
+// ─── WAIT FOR NOTION CREDENTIALS (retry loop) ────────────
+async function waitForNotionCredentials(maxAttempts = 5) {
+  // Retry with exponential backoff to avoid hardcoded delay race conditions
+  const delays = [300, 600, 1000, 1500, 2500]
+  for (let i = 0; i < maxAttempts; i++) {
+    const creds = getNotionCredentials()
+    if (creds.token && creds.databaseId) return creds
+    if (i < maxAttempts - 1) {
+      await new Promise(r => setTimeout(r, delays[i]))
+    }
+  }
+  return { token: null, databaseId: null, titleProperty: null }
+}
+
 // ─── AUTO-SYNC SINGLE ENTRY (fire-and-forget) ───────────
 export async function autoSyncEntry(entry) {
-  // Small delay to ensure credentials are hydrated from getUser()
-  await new Promise(r => setTimeout(r, 1500))
+  // Retry loop to ensure credentials are hydrated from getUser() (replaces hardcoded 1.5s delay)
+  const { token, databaseId, titleProperty } = await waitForNotionCredentials()
   try {
-    const { token, databaseId, titleProperty } = getNotionCredentials()
     if (!token || !databaseId) return // not connected
 
     const syncMap = loadSyncMap()
@@ -140,9 +174,9 @@ export async function autoSyncEntry(entry) {
 
 // ─── AUTO-UPDATE SINGLE ENTRY ON NOTION (fire-and-forget) ─
 export async function autoUpdateNotionEntry(entry) {
-  await new Promise(r => setTimeout(r, 1500))
+  // Retry loop instead of hardcoded 1.5s delay
+  const { token, databaseId, titleProperty } = await waitForNotionCredentials()
   try {
-    const { token, databaseId, titleProperty } = getNotionCredentials()
     if (!token || !databaseId) return
 
     const syncMap = loadSyncMap()

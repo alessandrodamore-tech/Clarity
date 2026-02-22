@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react'
 import { supabase } from './supabase'
-import { autoSyncEntry, autoUpdateNotionEntry, getNotionCredentials, pullFromNotion, loadNotionCredentialsFromUser } from './notion'
+import { autoSyncEntry, autoUpdateNotionEntry, getNotionCredentials, pullFromNotion, loadNotionCredentialsFromUser, loadNotionSyncMapFromUser } from './notion'
 
 const AppContext = createContext(null)
 
@@ -19,11 +19,13 @@ export function AppProvider({ children }) {
       // Fetch fresh user metadata from server (session JWT may have stale metadata)
       if (u) {
         loadNotionCredentialsFromUser(u) // use cached first for speed
+        loadNotionSyncMapFromUser(u) // hydrate sync map from Supabase source of truth
         try {
           const { data } = await supabase.auth.getUser()
           if (data?.user) {
             setUser(data.user)
             loadNotionCredentialsFromUser(data.user)
+            loadNotionSyncMapFromUser(data.user) // fresh metadata wins over session JWT cache
           }
         } catch {}
       }

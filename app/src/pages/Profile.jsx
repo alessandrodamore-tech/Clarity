@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useApp } from '../lib/store'
+import { supabase } from '../lib/supabase'
 import { User, Check, Info } from 'lucide-react'
 
 const CONTEXT_KEY = 'clarity_user_context'
@@ -12,23 +13,42 @@ export default function Profile() {
 
   useEffect(() => { requestAnimationFrame(() => setMounted(true)) }, [])
 
+  // Load AI context: prefer Supabase user_metadata (cross-device), fall back to localStorage
   useEffect(() => {
-    try {
-      const stored = localStorage.getItem(CONTEXT_KEY)
-      if (stored) setContext(stored)
-    } catch {}
-  }, [])
+    const supabaseContext = user?.user_metadata?.ai_context
+    if (supabaseContext !== undefined && supabaseContext !== null) {
+      setContext(supabaseContext)
+      // Sync to localStorage as cache
+      try { localStorage.setItem(CONTEXT_KEY, supabaseContext) } catch {}
+    } else {
+      // Fall back to localStorage while Supabase data loads
+      try {
+        const stored = localStorage.getItem(CONTEXT_KEY)
+        if (stored) setContext(stored)
+      } catch {}
+    }
+  }, [user])
 
-  const handleSave = () => {
+  const handleSave = async () => {
+    const trimmed = context.trim()
+    // Save to localStorage immediately (optimistic, instant)
     try {
-      if (context.trim()) {
-        localStorage.setItem(CONTEXT_KEY, context.trim())
+      if (trimmed) {
+        localStorage.setItem(CONTEXT_KEY, trimmed)
       } else {
         localStorage.removeItem(CONTEXT_KEY)
       }
-      setSaved(true)
-      setTimeout(() => setSaved(false), 2000)
     } catch {}
+
+    // Persist to Supabase user_metadata for cross-device access (parallel, non-blocking)
+    supabase.auth.updateUser({
+      data: { ai_context: trimmed || '' }
+    }).then(({ error }) => {
+      if (error) console.warn('Failed to save AI context to Supabase:', error)
+    })
+
+    setSaved(true)
+    setTimeout(() => setSaved(false), 2000)
   }
 
   const sectionAnim = (delay) => ({

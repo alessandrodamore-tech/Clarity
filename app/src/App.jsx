@@ -13,7 +13,7 @@ function ProtectedRoute({ children }) {
   const { user, loading } = useApp()
   
   if (loading) return (
-    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+    <div style={{ minHeight: '100dvh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
       <div className="bg-mesh" />
       <p style={{ fontFamily: 'var(--font-display)', color: 'var(--text-muted)', position: 'relative', zIndex: 1 }}>Loading...</p>
     </div>
